@@ -15,6 +15,8 @@ let refreshing = false;
 let instanceId;
 let registrationOptions;
 let localTokenRequest = 0;
+let chatMessages = [];
+let chatSignature;
 
 function escapeHtml(value) { const node = document.createElement('span'); node.textContent = value; return node.innerHTML; }
 marked.use({ renderer: {
@@ -123,6 +125,7 @@ function logout() {
   $('connection').textContent = 'Sign in to connect';
   $('messages').replaceChildren(); $('agents').replaceChildren(); $('events').replaceChildren(); $('thread').replaceChildren(); $('handoff-detail').replaceChildren();
   snapshot = undefined; instanceId = undefined; threadId = undefined; replyTo = undefined;
+  chatMessages = []; chatSignature = undefined;
   createdCredentials = undefined; $('new-credentials').hidden = true;
 }
 function fillRecipients() {
@@ -190,8 +193,13 @@ function renderAgents() {
 }
 function messageCard(message, inThread = false) {
   const card = element('article', undefined, 'message-card');
+  card.classList.add(message.sender === '@human' ? 'human-message' : 'agent-message');
+  card.dataset.messageId = message.id;
   const route = element('div', undefined, 'message-route');
-  route.append(element('strong', message.sender), element('span', '→'), element('strong', message.recipient));
+  const sender = message.sender === '@human' ? 'You' : message.sender;
+  const avatar = element('span', message.sender === '@human' ? 'Y' : sender.slice(0,2).toUpperCase(), 'chat-avatar');
+  avatar.setAttribute('aria-hidden','true');
+  route.append(avatar, element('strong', sender), element('span', '→'), element('span', message.recipient === '@human' ? 'You' : message.recipient));
   const timestamp = element('time', time(message.created_at)); timestamp.dateTime = message.created_at; route.append(timestamp);
   const footer = element('div', undefined, 'message-footer');
   footer.append(element('span', message.status, `status ${message.status}`), element('span', message.project, 'project-tag'), element('span', message.kind));
@@ -223,6 +231,35 @@ function messageCard(message, inThread = false) {
   }
   return card;
 }
+function renderChat(messages, older = false) {
+  const container = $('messages');
+  const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+  const top = container.scrollTop, height = container.scrollHeight;
+  const previousCount = chatMessages.length;
+  chatMessages = older ? [...new Map([...messages, ...chatMessages].map(message => [message.id, message])).values()] : messages;
+  const signature = JSON.stringify(chatMessages);
+  if (signature === chatSignature) return;
+  chatSignature = signature;
+  const conversations = new Map();
+  for (const message of [...chatMessages].sort((a,b) => a.seq-b.seq)) {
+    if (!conversations.has(message.conversation_id)) conversations.set(message.conversation_id, []);
+    conversations.get(message.conversation_id).push(message);
+  }
+  container.replaceChildren();
+  const groups = [...conversations.values()].sort((a,b) => a.at(-1).seq-b.at(-1).seq);
+  for (const messages of groups) {
+    const group = element('section', undefined, 'chat-conversation');
+    const first = messages[0];
+    const header = element('div', undefined, 'chat-conversation-heading');
+    header.append(element('span', `${first.project} · ${first.body.replace(/\s+/g,' ').slice(0,90)}`));
+    group.append(header, ...messages.map(message => messageCard(message)));
+    container.append(group);
+  }
+  if (!chatMessages.length) empty(container, 'Start a conversation. Choose a project and agent below, then send your message.');
+  if (older) container.scrollTop = top + container.scrollHeight - height;
+  else if (nearBottom || !previousCount) container.scrollTop = container.scrollHeight;
+  else container.scrollTop = top;
+}
 async function refresh() {
   if (refreshing || !token) return;
   refreshing = true;
@@ -231,7 +268,6 @@ async function refresh() {
     const project = $('project-filter').value;
     const data = await api(`/api/dashboard?limit=50${project ? `&project=${encodeURIComponent(project)}` : ''}`);
     if (token !== usedToken) return;
-    const firstLoad = !snapshot;
     snapshot = data;
     $('agent-count').textContent = data.agents.length;
     $('connected-count').textContent = data.agents.filter(agent => agent.connected).length;
@@ -241,13 +277,19 @@ async function refresh() {
     const projects = [...new Set(data.agents.map(agent => agent.project))].sort();
     $('project-filter').replaceChildren(new Option('All projects', ''), ...projects.map(name => new Option(name, name)));
     $('project-filter').value = project;
-    if (firstLoad && !data.agents.some(agent => agent.project === $('message-project').value) && data.agents[0]) $('message-project').value = data.agents[0].project;
+    const selectedProject = $('message-project').value;
+    const options = [...$('message-project').options];
+    const values = projects.length ? projects : [''];
+    if (options.length !== values.length || options.some((option, index) => option.value !== values[index])) {
+      $('message-project').replaceChildren(...(projects.length ? projects.map(name => new Option(name, name)) : [new Option('Register an agent first', '')]));
+      $('message-project').value = projects.includes(selectedProject) ? selectedProject : projects[0] || '';
+    }
+    $('message-project').disabled = Boolean(replyTo) || !projects.length;
     renderAgents(); fillRecipients(); renderWorkers();
     if (replyTo) {
       const existing = await api(`/api/messages/${replyTo}`); $('recipient').value = existing.sender;
     }
-    $('messages').replaceChildren(...data.messages.map(message => messageCard(message)));
-    if (!data.messages.length) empty($('messages'), 'No messages yet. Send a question to an agent to begin.');
+    renderChat(data.messages);
     before = data.nextBefore; $('older').disabled = !before || data.messages.length < 50;
     $('events').replaceChildren(...data.events.map(event => {
       const row = element('div', undefined, 'event'); row.append(element('div', event.action.replaceAll('_', ' '), 'event-action'), element('div', `${event.actor} · ${time(event.created_at)}`, 'event-detail')); return row;
@@ -396,8 +438,16 @@ async function login() {
 $('login-form').addEventListener('submit', event => { event.preventDefault(); token = $('token').value.trim(); run(login); });
 $('logout').addEventListener('click', logout);
 $('refresh').addEventListener('click', () => run(refresh));
-$('project-filter').addEventListener('change', () => run(refresh));
-$('message-project').addEventListener('input', fillRecipients);
+$('project-filter').addEventListener('change', () => { chatMessages = []; chatSignature = undefined; run(refresh); });
+$('chat-latest').addEventListener('click', () => { $('messages').scrollTop = $('messages').scrollHeight; });
+$('body').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.isComposing) {
+    event.preventDefault();
+    const button = $('message-form').querySelector('button[type="submit"]');
+    if (!button.disabled) $('message-form').requestSubmit(button);
+  }
+});
+$('message-project').addEventListener('change', fillRecipients);
 $('pause').addEventListener('click', () => run(async () => { await api('/api/pause', 'POST', { paused: !snapshot.paused }); await refresh(); }));
 $('cancel-reply').addEventListener('click', cancelReply);
 $('close-handoff').addEventListener('click', () => { $('handoff-panel').hidden = true; });
@@ -419,7 +469,7 @@ $('thread-more').addEventListener('click', () => run(moreThread));
 $('older').addEventListener('click', () => run(async () => {
   const project = $('project-filter').value;
   const data = await api(`/api/dashboard?limit=50&before=${before}${project ? `&project=${encodeURIComponent(project)}` : ''}`);
-  $('messages').append(...data.messages.map(message => messageCard(message))); before = data.nextBefore;
+  renderChat(data.messages, true); before = data.nextBefore;
   $('older').disabled = !before || data.messages.length < 50;
 }));
 $('message-form').addEventListener('submit', event => {
@@ -429,6 +479,8 @@ $('message-form').addEventListener('submit', event => {
     try {
       await api('/api/messages', 'POST', { project: $('message-project').value, to: $('recipient').value, body: $('body').value, kind: $('question').checked ? 'question' : 'message', idempotencyKey: sendKey, ...(replyTo ? { replyTo } : {}) });
       $('body').value = ''; cancelReply(); await refresh();
+      $('messages').scrollTop = $('messages').scrollHeight;
+      $('body').focus();
     } finally { button.disabled = false; }
   });
 });

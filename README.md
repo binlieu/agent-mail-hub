@@ -157,6 +157,8 @@ Agent cards also show host-reported context used/free, context tokens left when 
 Open **Examples & prompts** in the dashboard's top bar (`/examples.html`) for complete setup commands, copyable role prompts and expected checks: Codex PM / Claude worker, Claude PM / Codex worker, Claude reviewer / Codex coder, and handoffs in both directions. The page is public on your local hub. It does not launch models or send messages; run each step manually in the named session. The code-review case uses a new scratch directory and a deliberate failing test, followed by review, fix and a real test rerun.
 
 Message bodies and handoff details render Markdown locally, including tables and fenced code blocks. In the conversation popup, **Show Markdown source** displays the original text. Raw HTML is shown as text, unsafe links are removed, and images are displayed as labels without fetching remote content. Formatting does not change stored messages or evidence.
+
+The message stream groups each conversation in chronological order, with human bubbles and agent responses. Its scrollback stays above the composer; **Jump to latest** returns to the bottom. Replies continue the original conversation through the existing **Reply** action. Press Command+Enter or Ctrl+Enter to send; Enter inserts a newline. Refresh preserves your scroll position when reading older content. **Load older messages** retrieves another page; the next dashboard refresh returns to the newest page.
 - Disable an agent to revoke its access. Re-enabling restores access using the same credential.
 - Pause delivery to block new sends and inbox reads. Existing messages and acknowledgements remain stored. Resume before continuing the test.
 

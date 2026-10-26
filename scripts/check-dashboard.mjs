@@ -14,6 +14,7 @@ const hub = await startHub(directory, config, 0, {localAdminAccess:true,workerHo
 const admin = { role: 'admin' };
 const planner = hub.store.createAgent(admin, { name: 'planner', project: 'demo', provider: 'simulated', model: 'ui-test', capabilities: [] });
 const builder = hub.store.createAgent(admin, { name: 'builder', project: 'demo', provider: 'simulated', model: 'ui-test', capabilities: [] });
+hub.store.createAgent(admin, { name: 'other-project-agent', project: 'other-project', provider: 'simulated', model: 'ui-test', capabilities: [] });
 const usageId = randomUUID();
 const usageTime = new Date().toISOString();
 hub.store.reportUsage({role:'agent',name:'planner',project:'demo'}, parseUsage('claude',JSON.stringify({session_id:usageId,context_window:{used_percentage:25,context_window_size:200000,current_usage:{input_tokens:50000}},rate_limits:{five_hour:{used_percentage:20,resets_at:Math.floor(Date.now()/1000)+3600},seven_day:{used_percentage:35,resets_at:Math.floor(Date.now()/1000)+86400}}}),usageId,usageTime));
@@ -30,6 +31,7 @@ page.on('console', message => { if (message.type() === 'error') errors.push(mess
 try {
   await page.goto(hub.url);
   await page.getByRole('button',{name:"Show this hub's admin token",exact:true}).click();
+  await page.waitForFunction(() => document.getElementById('local-admin-token').value.length > 0);
   assert.equal(await page.locator('#local-admin-token').inputValue(),config.adminToken);
   await page.context().grantPermissions(['clipboard-read','clipboard-write']);
   await page.getByRole('button',{name:'Copy token',exact:true}).click();
@@ -100,7 +102,13 @@ try {
   await page.getByRole('button', { name: 'Resume delivery' }).click();
   await page.getByRole('button', { name: 'Pause delivery' }).waitFor();
   assert.equal(hub.store.paused(), false);
-  await page.getByLabel('Project', { exact: true }).last().fill('demo');
+  await page.locator('#message-project').selectOption('other-project');
+  assert.deepEqual(await page.locator('#recipient option').allTextContents(), ['other-project-agent']);
+  await page.getByRole('button', {name:'Refresh',exact:true}).click();
+  await page.locator('#message-project option[value="other-project"]').waitFor({state:'attached'});
+  assert.equal(await page.locator('#message-project').inputValue(), 'other-project');
+  await page.locator('#message-project').selectOption('demo');
+  assert.deepEqual(await page.locator('#recipient option').allTextContents(), ['builder','planner']);
   await page.getByLabel('Recipient', { exact: true }).selectOption('builder');
   await page.getByLabel('Message', { exact: true }).fill('Human dashboard question');
   await page.getByLabel('Question', { exact: true }).check();
@@ -108,16 +116,26 @@ try {
   await page.getByText('Human dashboard question', { exact: true }).waitFor();
   const sent = hub.store.dashboard(admin, { after: 0, limit: 50 }).messages.find(message => message.body === 'Human dashboard question');
   assert.equal(sent.sender, '@human');
+  assert.equal(await page.locator('.chat-panel #message-form').count(), 1, 'Composer belongs to the chat panel');
+  assert.equal(await page.locator('#messages .human-message').count(), 1);
+  assert.equal(await page.locator('#messages .human-message .message-route strong').innerText(), 'You');
   hub.store.send({ role: 'agent', name: 'builder', project: 'demo' }, { to: '@human', body: 'Reply to the human', kind: 'message', idempotencyKey: 'ui-human-reply', replyTo: sent.id });
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByText('Reply to the human', { exact: true }).waitFor();
+  const humanThread = page.locator('.chat-conversation').filter({has:page.locator(`[data-message-id="${sent.id}"]`)});
+  assert.deepEqual(await humanThread.locator('.message-card').evaluateAll(cards=>cards.map(card=>card.classList.contains('human-message'))), [true,false], 'Conversation reads human then agent');
+  await page.locator('#messages').evaluate(node=>{node.scrollTop=0;});
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  assert.equal(await page.locator('#messages').evaluate(node=>node.scrollTop),0,'Refresh preserves scrollback');
+  await page.getByRole('button',{name:'Jump to latest',exact:true}).click();
+  assert.ok(await page.locator('#messages').evaluate(node=>node.scrollHeight-node.clientHeight-node.scrollTop<2));
   await page.locator('#messages .message-card').filter({ hasText: 'Reply to the human' }).getByRole('button', { name: 'View conversation', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Reply', exact: true }).click();
   assert.equal(await page.locator('#thread-panel').isVisible(), false, 'Reply returns to the composer');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'body');
   assert.equal(await page.locator('#recipient').inputValue(), 'builder');
   await page.getByLabel('Message', { exact: true }).fill('Human response in the same thread');
-  await page.getByRole('button', { name: 'Send message' }).click();
+  await page.locator('#body').press('Control+Enter');
   await page.getByText('Human response in the same thread', { exact: true }).waitFor();
   const followup = hub.store.dashboard(admin, { after: 0, limit: 50 }).messages.find(message => message.body === 'Human response in the same thread');
   assert.equal(followup.conversation_id, sent.conversation_id);
@@ -216,5 +234,5 @@ try {
   await page.getByRole('link',{name:'1. Codex PM / Claude worker',exact:true}).click();
   await page.screenshot({path:join(directory,'examples-desktop.png'),fullPage:true});
   assert.deepEqual(errors, []);
-  console.log(`PASS: dashboard sign-in, literal text/XSS, conversations, pause/resume, human send/reply, registration/download, disable/enable, mobile layout, handoff context/result display, checksum-verified evidence download and sign-out.\nBrowser artifacts: ${directory}`);
+  console.log(`PASS: dashboard sign-in, safe Markdown, grouped chat, scrollback, keyboard send/reply, conversations, pause/resume, registration/download, disable/enable, mobile layout, handoff context/result display, checksum-verified evidence download and sign-out.\nBrowser artifacts: ${directory}`);
 } finally { await browser.close(); await hub.close(); }
