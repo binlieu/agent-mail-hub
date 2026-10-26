@@ -133,9 +133,18 @@ node dist/cli.js demo --serve --port 47932</code></pre>
         <form id="login-form">
           <label for="token" class="form-label">Dashboard administrator token</label>
           <input id="token" type="password" class="form-control" required autocomplete="off" spellcheck="false">
-          <p class="form-text">Get it with <code>agent-mail-hub admin-token</code>, using your hub's data directory.</p>
+          <p class="form-text">Retrieve the token in Terminal, or use local token display below when enabled for this hub.</p>
           <button class="btn btn-primary mt-2" type="submit">Open dashboard →</button>
         </form>
+        <section class="sign-in-help mt-4" aria-labelledby="sign-in-help-title">
+          <h2 id="sign-in-help-title">Administrator access for this hub</h2>
+          <p class="small text-secondary mt-2">Each hub has one administrator token. Other hubs have their own tokens.</p>
+          <p id="sign-in-hub" class="small text-secondary"></p>
+          <div class="d-flex flex-wrap gap-2 mb-2"><button id="copy-admin-command" class="btn btn-sm btn-outline-secondary" type="button">Copy Terminal command</button><button id="show-admin-token" class="btn btn-sm btn-outline-secondary" type="button" hidden>Show this hub's admin token</button></div>
+          <pre class="sign-in-command"><code id="admin-token-command">node dist/cli.js admin-token --data-dir /absolute/path/your-hub</code></pre>
+          <div id="local-token-panel" hidden><label class="form-label" for="local-admin-token">This hub's admin token</label><input id="local-admin-token" class="form-control" type="text" readonly autocomplete="off" spellcheck="false"><div class="d-flex flex-wrap gap-2 mt-2"><button id="copy-admin-token" class="btn btn-sm btn-outline-secondary" type="button">Copy token</button><button id="use-admin-token" class="btn btn-sm btn-primary" type="button">Use token for sign-in</button></div></div>
+          <p id="sign-in-status" class="form-text mb-0" role="status" aria-live="polite"></p>
+        </section>
         <p class="small text-secondary mt-4 mb-0">This hub uses its own database and credentials. Your existing A2A installation stays separate.</p>
       </div>
     </section>

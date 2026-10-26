@@ -10,7 +10,7 @@ import { request, verifyHub } from './http-client.js';
 const help = `Agent Mail Hub ${VERSION} — isolated local agent messaging
 
   setup                         Initialize private data, print next steps
-  start                         Start hub and bundled dashboard (foreground)
+  start [--local-admin-access]   Start hub; optionally show its token on sign-in
   add-agent --name NAME          Create agent credentials on the running hub
     [--project default] [--provider unspecified] [--model unspecified]
   config --credentials FILE     Print a generic MCP configuration snippet
@@ -38,7 +38,7 @@ async function main() {
     name: { type: 'string' }, project: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' },
     to: { type: 'string' }, body: { type: 'string' }, key: { type: 'string' }, message: { type: 'string' },
     after: { type: 'string' }, serve: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
-    source: { type: 'string' }, input: { type: 'string' }, 'session-id': { type: 'string' }, watch: { type: 'boolean' }, 'account-limits': { type: 'boolean' }
+    source: { type: 'string' }, input: { type: 'string' }, 'session-id': { type: 'string' }, watch: { type: 'boolean' }, 'account-limits': { type: 'boolean' }, 'local-admin-access': { type: 'boolean' }
   }});
   const command = positionals[0];
   if (!command || values.help || command === 'help') { console.log(help); return; }
@@ -157,7 +157,7 @@ async function main() {
   if (command === 'admin-token') { console.log(config.adminToken); return; }
   if (command === 'start') {
     const { startHub } = await import('./server.js');
-    const hub = await startHub(directory, config);
+    const hub = await startHub(directory, config, config.port, { localAdminAccess: Boolean(values['local-admin-access']) });
     console.log(`Agent Mail Hub ${VERSION}\nDashboard: ${hub.url}\nData: ${directory}\nUse admin-token to sign in. Press Ctrl+C to stop this hub.`);
     handleShutdown(hub.close);
     return;

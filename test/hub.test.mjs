@@ -28,6 +28,29 @@ async function fixture() {
 }
 function message(to, key = randomUUID(), body = 'Hello') { return { to, body, kind: 'question', idempotencyKey: key }; }
 
+test('local sign-in token display is explicit, opt-in and limited to same-origin requests', async () => {
+  const dir = directory(); const config = initialize(dir);
+  let hub = await startHub(dir, config, 0);
+  const show = (headers = {}) => fetch(hub.url + '/api/local-admin-token', { method:'POST', headers:{'Content-Type':'application/json','Sec-Fetch-Site':'same-origin','X-AMH-Local-Access':'show-token',...headers}, body:JSON.stringify({action:'show'}) });
+  try {
+    const help = await (await fetch(hub.url + '/api/sign-in')).json();
+    assert.equal(help.localAdminAccess, false);
+    assert.ok(help.adminTokenCommand.includes(dir));
+    assert.ok(!JSON.stringify(help).includes(config.adminToken));
+    assert.equal((await show()).status,403);
+    await hub.close(); hub = await startHub(dir,config,0,{localAdminAccess:true});
+    const response = await show();
+    assert.equal(response.status,200); assert.equal(response.headers.get('cache-control'),'no-store');
+    assert.equal((await response.json()).adminToken,config.adminToken);
+    assert.equal((await show({'Sec-Fetch-Site':'cross-site'})).status,403);
+    assert.equal((await show({'X-AMH-Local-Access':'wrong'})).status,403);
+    assert.equal((await show({Origin:'https://example.com'})).status,403);
+    assert.equal((await fetch(hub.url+'/api/local-admin-token')).status,401);
+    assert.ok(!(await (await fetch(hub.url)).text()).includes(config.adminToken));
+    assert.equal((await fetch(hub.url+'/api/agents')).status,401);
+  } finally { await hub.close(); }
+});
+
 test('requested model preferences validate supported effort and survive restart', async () => {
   const f = await fixture();
   let closed = false;

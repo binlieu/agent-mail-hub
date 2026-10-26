@@ -7,7 +7,7 @@ import { Store } from './store.js';
 import { modelOptions } from './model-options.js';
 import { usageSchema, evidenceSchema, evidenceReviewSchema, handoffSchema, handoffUpdateSchema, agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
 import { SERVICE, VERSION, type HubConfig } from './config.js';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const publicRoot = fileURLToPath(new URL('../public/', import.meta.url));
 const assets: Record<string, [string, string]> = {
@@ -36,8 +36,10 @@ function json(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-export async function startHub(directory: string, config: HubConfig, port = config.port) {
+export async function startHub(directory: string, config: HubConfig, port = config.port, options: { localAdminAccess?: boolean } = {}) {
   const store = new Store(join(directory, 'hub.sqlite'));
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+  const adminTokenCommand = `${quote(process.execPath)} ${quote(fileURLToPath(new URL('./cli.js', import.meta.url)))} admin-token --data-dir ${quote(resolve(directory))}`;
   let listeningPort = port;
   let authFailures = 0;
   let authWindow = Date.now();
@@ -61,6 +63,13 @@ export async function startHub(directory: string, config: HubConfig, port = conf
         return res.end(content);
       }
       if (!path.startsWith('/api/')) throw new HubError(404, 'Not found');
+      if (path === '/api/sign-in' && req.method === 'GET') return json(res, 200, { localAdminAccess: Boolean(options.localAdminAccess), adminTokenCommand, hubUrl: `http://127.0.0.1:${listeningPort}` });
+      if (path === '/api/local-admin-token' && req.method === 'POST') {
+        if (!options.localAdminAccess) throw new HubError(403, 'Local token display is disabled. Start this hub with --local-admin-access to enable it.');
+        if (req.headers['sec-fetch-site'] !== 'same-origin' || req.headers['x-amh-local-access'] !== 'show-token') throw new HubError(403, 'Use the local sign-in page to show this token');
+        z.object({ action: z.literal('show') }).strict().parse(await body(req));
+        return json(res, 200, { adminToken: config.adminToken });
+      }
       if (Date.now() - authWindow > 60000) { authWindow = Date.now(); authFailures = 0; }
       if (authFailures >= 100) throw new HubError(429, 'Too many failed authentication attempts; retry in one minute');
       const authorization = req.headers.authorization;

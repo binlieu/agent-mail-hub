@@ -36,6 +36,8 @@ node dist/cli.js admin-token
 
 Paste that token into the dashboard. It is an administrator secret; do not paste it into an AI agent's prompt or commit it.
 
+The sign-in page provides the exact Terminal command for the current hub. On a personal single-user machine, start with `node dist/cli.js start --data-dir /absolute/path/my-hub --local-admin-access` to enable **Show this hub's admin token**, **Copy token** and **Use token for sign-in**. This explicitly allows local page users to retrieve that hub's administrator token. The option is off by default and applies only to that server process; start without it to disable display. Other hubs and existing A2A settings are unchanged.
+
 ### Keep it separate from existing A2A
 
 This project uses:

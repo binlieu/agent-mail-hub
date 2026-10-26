@@ -2,11 +2,13 @@
 
 Base URL: `http://127.0.0.1:47831`. This is not a remote MCP or A2A-standard endpoint.
 
-All `/api/*` routes require `Authorization: Bearer TOKEN`. Request bodies use `Content-Type: application/json`. Errors are `{ "error": "description" }` with an appropriate HTTP status. No bearer tokens in query strings. Public `/health` identifies the service, release, and instance without exposing credentials.
+Protected `/api/*` routes require `Authorization: Bearer TOKEN`; sign-in help and explicitly enabled local token display are exceptions listed below. Request bodies use `Content-Type: application/json`. Errors are `{ "error": "description" }` with an appropriate HTTP status. No bearer tokens in query strings. Public `/health` identifies the service, release, and instance without exposing credentials.
 
 | Method | Route | Access | Input / result |
 |---|---|---|---|
 | GET | `/health` | Public | `{service, version, instanceId}` |
+| GET | `/api/sign-in` | Public local help | Hub URL, exact token command and whether local token display is enabled; no token |
+| POST | `/api/local-admin-token` | Opt-in local access | Available only with `start --local-admin-access`; requires `Sec-Fetch-Site: same-origin`, `X-AMH-Local-Access: show-token` and JSON `{action:"show"}`. Returns this hub's admin token with `Cache-Control: no-store`. Existing Host/Origin checks apply. |
 | GET | `/api/me` | Any valid token | Identity, instanceId, pause state |
 | GET | `/api/agents` | Any valid token | `{items}`; agents see only their project |
 | POST | `/api/agents` | Admin | `{name,project?,provider?,model?,reasoningEffort?,capabilities?}` → metadata and one-time token |

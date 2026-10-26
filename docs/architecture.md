@@ -38,6 +38,8 @@ Bind only to `127.0.0.1`. Validate Host and Origin, require bearer authenticatio
 
 The OS account is trusted. Private files are not encrypted at rest; disk encryption and OS access control remain the operator's responsibility. This release is not designed for a hostile multiuser server or public internet exposure.
 
+For personal single-user operation, the optional `start --local-admin-access` flag allows explicit token retrieval from the sign-in page without prior authentication. It is off by default and not persisted. A same-origin POST with a custom header and action is required; browser responses are not cached. This is a convenience mode, not an independent authentication boundary against local users or processes. Sign-in help always exposes only the command/instance address until display is explicitly requested. Tokens are never embedded in static HTML, URLs or logs. The UI clears the revealed value on hide, use, login or logout.
+
 ## Isolation from existing A2A
 
 This package has independent executable names, environment variables, configuration, database, credentials, ports, and MCP entry names. It does not import or invoke a2a-talk or chi-harness. No terminal wake, hooks, global install, service registration, or automatic edits to AI client configuration occur.

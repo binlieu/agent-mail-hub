@@ -14,6 +14,7 @@ let threadTrigger;
 let refreshing = false;
 let instanceId;
 let registrationOptions;
+let localTokenRequest = 0;
 
 function shellQuote(value) { return "'" + value.replaceAll("'", "'\"'\"'") + "'"; }
 function updateModelChoice(resetModel = false) {
@@ -82,6 +83,7 @@ async function run(work) { try { error(''); await work(); } catch (failure) { er
 function empty(container, message) { container.replaceChildren(element('p', message, 'empty')); }
 function logout() {
   closeThread();
+  hideLocalToken();
   token = ''; sessionStorage.removeItem('amh.dashboard.token'); clearInterval(polling);
   $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('connection').textContent = 'Sign in to connect';
@@ -299,6 +301,7 @@ async function login() {
   const me = await api('/api/me');
   if (me.role !== 'admin') throw new Error('Use the dashboard administrator token, not an agent token.');
   instanceId = me.instanceId;
+  hideLocalToken();
   sessionStorage.setItem('amh.dashboard.token', token);
   $('token').value = ''; $('login-panel').hidden = true; $('dashboard').hidden = false; $('logout').hidden = false;
   clearInterval(polling); await refresh(); await loadModelOptions();
@@ -367,4 +370,42 @@ $('download-credentials').addEventListener('click', () => {
   const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = createdCredentials.name + '.json'; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000); createdCredentials = undefined; $('new-credentials').hidden = true;
 });
+function hideLocalToken() {
+  localTokenRequest++;
+  $('local-admin-token').value = ''; $('local-token-panel').hidden = true;
+  $('show-admin-token').textContent = "Show this hub's admin token";
+}
+async function copySignInText(value, message) {
+  try { await navigator.clipboard.writeText(value); $('sign-in-status').textContent = message; }
+  catch { $('sign-in-status').textContent = 'Select the text and copy it manually; clipboard access is unavailable.'; }
+}
+$('copy-admin-command').addEventListener('click', () => copySignInText($('admin-token-command').textContent, 'Terminal command copied. Run it on this Mac and paste the returned token above.'));
+$('copy-admin-token').addEventListener('click', () => copySignInText($('local-admin-token').value, 'Admin token copied.'));
+$('use-admin-token').addEventListener('click', () => { $('token').value = $('local-admin-token').value; hideLocalToken(); $('token').focus(); $('sign-in-status').textContent = 'Token filled. Click Open dashboard to sign in.'; });
+$('show-admin-token').addEventListener('click', async () => {
+  if (!$('local-token-panel').hidden) { hideLocalToken(); $('sign-in-status').textContent = 'Token hidden.'; return; }
+  $('show-admin-token').disabled = true;
+  const requestId = ++localTokenRequest;
+  try {
+    const response = await fetch('/api/local-admin-token', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-AMH-Local-Access': 'show-token' }, body: JSON.stringify({ action: 'show' }), signal: AbortSignal.timeout(8000) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to show this hub token');
+    if (requestId !== localTokenRequest || $('login-panel').hidden) return;
+    $('local-admin-token').value = result.adminToken; $('local-token-panel').hidden = false;
+    $('show-admin-token').textContent = 'Hide admin token'; $('sign-in-status').textContent = 'Token shown for this hub only.';
+  } catch (failure) { if (requestId === localTokenRequest) $('sign-in-status').textContent = failure.message; }
+  finally { $('show-admin-token').disabled = false; }
+});
+async function loadSignInHelp() {
+  try {
+    const response = await fetch('/api/sign-in', {signal:AbortSignal.timeout(8000)});
+    if (!response.ok) return;
+    const help = await response.json();
+    $('admin-token-command').textContent = help.adminTokenCommand;
+    $('sign-in-hub').textContent = `Hub: ${help.hubUrl}`;
+    $('show-admin-token').hidden = !help.localAdminAccess;
+    $('sign-in-status').textContent = help.localAdminAccess ? 'Local token display is enabled for this hub.' : 'For local token display, start this hub with --local-admin-access.';
+  } catch { $('sign-in-status').textContent = 'Use the Terminal command with this hub’s data directory to retrieve its token.'; }
+}
+void loadSignInHelp();
 if (token) run(login);
