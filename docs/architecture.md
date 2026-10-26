@@ -14,7 +14,7 @@ The package uses the official MCP TypeScript SDK 2.4.0. `serveStdio` supports mo
 - `messages`: monotonic sequence, UUID, conversation UUID, project, participants, body, type, idempotency key, reply link, lifecycle timestamps.
 - `events`: append-only delivery and administrative events.
 
-SQLite uses WAL, foreign keys, prepared statements, relevant indexes, and a busy timeout. Message insertion, reply acknowledgement, and audit events share a transaction. First schema version only; future changes need explicit migrations and backup instructions.
+SQLite uses WAL, foreign keys, prepared statements, relevant indexes, and a busy timeout. Message insertion, reply acknowledgement, and audit events share a transaction. The current schema adds evidence, message-evidence links, review receipts, handoffs and idempotent handoff decisions as separate tables. Startup preserves existing message rows. Back up existing data before upgrading; broader future schema changes need explicit migration instructions.
 
 ## Delivery model
 
@@ -34,7 +34,7 @@ A human administrator can inspect all projects and send as `@human`. The dashboa
 
 ## Local security boundary
 
-Bind only to `127.0.0.1`. Validate Host and Origin, require bearer authentication, deny cross-origin browser access, limit JSON bodies to 64 KiB, and reject invalid input. Serve only an explicit list of static files. Use a restrictive Content Security Policy and browser `textContent` for message content. Secrets never appear in URLs or logs. The dashboard tab stores its token in session storage until sign-out.
+Bind only to `127.0.0.1`. Validate Host and Origin, require bearer authentication, deny cross-origin browser access, limit JSON bodies to 128 KiB, and reject invalid input. Serve only an explicit list of static files. Use a restrictive Content Security Policy and browser `textContent` for message content. Secrets never appear in URLs or logs. The dashboard tab stores its token in session storage until sign-out.
 
 The OS account is trusted. Private files are not encrypted at rest; disk encryption and OS access control remain the operator's responsibility. This release is not designed for a hostile multiuser server or public internet exposure.
 

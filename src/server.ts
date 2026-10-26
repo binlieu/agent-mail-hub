@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from './store.js';
-import { agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
+import { evidenceSchema, evidenceReviewSchema, handoffSchema, handoffUpdateSchema, agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
 import { SERVICE, VERSION, type HubConfig } from './config.js';
 import { join } from 'node:path';
 
@@ -22,7 +22,7 @@ async function body(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     length += chunk.length;
-    if (length > 65536) throw new HubError(413, 'Request body exceeds 64 KiB');
+    if (length > 131072) throw new HubError(413, 'Request body exceeds 128 KiB');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -88,6 +88,21 @@ export async function startHub(directory: string, config: HubConfig, port = conf
         const input = heartbeatSchema.parse(await body(req));
         store.heartbeat(actor, input.sessionId, input.host, input.connected);
         return json(res, 200, { ok: true });
+      }
+      if (path === '/api/evidence' && req.method === 'POST') return json(res, 201, store.uploadEvidence(actor, evidenceSchema.parse(await body(req))));
+      const evidenceMatch = path.match(/^\/api\/evidence\/([^/]+)(\/review)?$/);
+      if (evidenceMatch) {
+        const id = identifier.parse(evidenceMatch[1]);
+        if (req.method === 'GET' && !evidenceMatch[2]) return json(res, 200, store.getEvidence(actor, id, url.searchParams.get('content') === 'true'));
+        if (req.method === 'POST' && evidenceMatch[2]) return json(res, 200, store.reviewEvidence(actor, id, evidenceReviewSchema.parse(await body(req))));
+      }
+      if (path === '/api/handoffs' && req.method === 'POST') return json(res, 201, store.createHandoff(actor, handoffSchema.parse(await body(req))));
+      if (path === '/api/handoffs' && req.method === 'GET') return json(res, 200, store.listHandoffs(actor, page()));
+      const handoffMatch = path.match(/^\/api\/handoffs\/([^/]+)$/);
+      if (handoffMatch) {
+        const id = identifier.parse(handoffMatch[1]);
+        if (req.method === 'GET') return json(res, 200, store.getHandoff(actor, id));
+        if (req.method === 'POST') return json(res, 200, store.updateHandoff(actor, id, handoffUpdateSchema.parse(await body(req))));
       }
       if (path === '/api/inbox' && req.method === 'GET') return json(res, 200, store.inbox(actor, page()));
       if (path === '/api/messages' && req.method === 'POST') {

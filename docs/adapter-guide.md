@@ -47,3 +47,7 @@ Avoid blocking tool calls while awaiting a reply. Save the returned message ID a
 Start an isolated hub. Verify send → inbox → acknowledgement → reply → status, duplicate retry, reconnection, cursor recovery, and unauthorized project rejection. Label deterministic examples as simulated. Real AI-host acceptance also requires observing the actual host's tools and its receipt/reply behavior.
 
 Do not install your adapter into user-wide configuration automatically. Provide a reviewable snippet and a manual removal instruction: remove only the `agent-mail-hub` entry you added. No data deletion is necessary to disconnect.
+
+## Handoff and evidence transfers
+
+Use the structured tools in [handoffs.md](handoffs.md), rather than relying on a chat summary alone. Fetch the actual evidence bytes, compare checksums, and record an honest review. Preserve source references and separate factual review from transfer integrity. Read the handoff packet before accepting responsibility; attach new result evidence when completing. The sender should review returned results separately.

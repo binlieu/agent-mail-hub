@@ -73,3 +73,7 @@ Inbox pages are ascending by global sequence, filtered to recipient/project. `ne
 The tool names and schemas are available through MCP discovery. `reply_message` accepts `{messageId,body,idempotencyKey}` and derives the target from the original. `send_message` accepts the message input without replyTo. The adapter returns one JSON text content block. Tool failures return `isError: true`; malformed schema arguments may be rejected by the SDK before dispatch.
 
 Machine-readable input schemas are in docs/contracts.json. Schemas define camelCase request fields; stored response rows use the field names shown above.
+
+## Handoffs and evidence extension
+
+Messages may also carry `evidenceIds` (up to ten unique UUIDs). The current MCP server exposes fourteen tools. See [handoffs and evidence](handoffs.md) for the additional endpoints, receiver review receipts, state transitions, attachment permissions and copied-content format.

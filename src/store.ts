@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { HubError, requireAdmin, type Actor, type NewAgent, type NewMessage, type Page } from './contracts.js';
+import { HubError, requireAdmin, type Actor, type NewAgent, type NewMessage, type Page, type NewEvidence, type EvidenceReview, type NewHandoff, type HandoffUpdate } from './contracts.js';
 import { secret } from './config.js';
 
 type Row = Record<string, any>;
@@ -49,6 +49,33 @@ export class Store {
         actor TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS events_project ON events(project, seq);
+      CREATE TABLE IF NOT EXISTS evidence (
+        id TEXT PRIMARY KEY, project TEXT NOT NULL, owner TEXT NOT NULL, filename TEXT NOT NULL,
+        media_type TEXT NOT NULL, source_ref TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL,
+        content BLOB NOT NULL, idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(project, owner, idempotency_key)
+      );
+      CREATE TABLE IF NOT EXISTS message_evidence (
+        message_id TEXT NOT NULL REFERENCES messages(id), evidence_id TEXT NOT NULL REFERENCES evidence(id),
+        PRIMARY KEY(message_id, evidence_id)
+      );
+      CREATE INDEX IF NOT EXISTS message_evidence_lookup ON message_evidence(evidence_id, message_id);
+      CREATE TABLE IF NOT EXISTS evidence_reviews (
+        evidence_id TEXT NOT NULL REFERENCES evidence(id), reviewer TEXT NOT NULL, state TEXT NOT NULL,
+        observed_sha256 TEXT NOT NULL, note TEXT NOT NULL, reviewed_at TEXT NOT NULL,
+        PRIMARY KEY(evidence_id, reviewer)
+      );
+      CREATE TABLE IF NOT EXISTS handoffs (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, message_id TEXT NOT NULL UNIQUE REFERENCES messages(id),
+        project TEXT NOT NULL, sender TEXT NOT NULL, recipient TEXT NOT NULL, packet TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'offered', idempotency_key TEXT NOT NULL, updated_at TEXT NOT NULL,
+        completion_message_id TEXT REFERENCES messages(id), UNIQUE(project, sender, idempotency_key)
+      );
+      CREATE INDEX IF NOT EXISTS handoffs_participants ON handoffs(project, recipient, seq);
+      CREATE TABLE IF NOT EXISTS handoff_updates (
+        handoff_id TEXT NOT NULL REFERENCES handoffs(id), idempotency_key TEXT NOT NULL, request TEXT NOT NULL,
+        PRIMARY KEY(handoff_id, idempotency_key)
+      );
     `);
     const version = this.db.prepare('SELECT value FROM meta WHERE key=?').get('schema_version');
     if (version?.value !== '1') throw new HubError(500, 'Unsupported database schema version');
@@ -124,44 +151,51 @@ export class Store {
   }
   private present(row: Row): Row {
     const replies = Number(this.db.prepare('SELECT count(*) AS count FROM messages WHERE reply_to=?').get(row.id)?.count);
-    return { ...row, status: replies ? 'answered' : row.acknowledged_at ? 'acknowledged' : row.delivered_at ? 'delivered' : 'queued' };
+    const evidence = this.db.prepare('SELECT e.id,e.filename,e.media_type,e.source_ref,e.sha256,e.size,e.owner FROM evidence e JOIN message_evidence me ON me.evidence_id=e.id WHERE me.message_id=? ORDER BY e.id').all(row.id);
+    const handoff = this.db.prepare('SELECT id,state FROM handoffs WHERE message_id=?').get(row.id) ?? null;
+    return { ...row, evidence, handoff, status: replies ? 'answered' : row.acknowledged_at ? 'acknowledged' : row.delivered_at ? 'delivered' : 'queued' };
   }
   send(actor: Actor, input: NewMessage, humanProject?: string): Row {
-    const sender = actor.role === 'admin' ? '@human' : actor.name;
     const project = actor.role === 'admin' ? humanProject : actor.project;
     if (!project) throw new HubError(400, 'Project is required');
-    return this.transaction(() => {
-      const previous = this.db.prepare('SELECT * FROM messages WHERE project=? AND sender=? AND idempotency_key=?').get(project, sender, input.idempotencyKey);
-      if (previous) {
-        if (previous.recipient !== input.to || previous.body !== input.body || previous.kind !== input.kind || previous.reply_to !== (input.replyTo ?? null)) {
-          throw new HubError(409, 'Idempotency key already used for different content');
-        }
-        return this.present(previous);
-      }
-      if (this.paused()) throw new HubError(503, 'Delivery paused by administrator; retry later with the same idempotency key');
-      let parent: Row | undefined;
-      if (input.replyTo) {
-        parent = this.accessibleMessage(actor, input.replyTo);
-        if (parent.project !== project || parent.recipient !== sender || parent.sender !== input.to) throw new HubError(403, 'Only the recipient can reply to the original sender');
-      }
-      if (input.to === sender) throw new HubError(400, 'Self-messaging is disabled to prevent accidental loops');
-      if (input.to === '@human') {
-        if (!parent || parent.sender !== '@human') throw new HubError(400, 'Human messages must be replies');
-      } else {
-        const recipient = this.db.prepare('SELECT name FROM agents WHERE name=? AND project=? AND enabled=1').get(input.to, project);
-        if (!recipient) throw new HubError(404, 'Recipient not found in your project or disabled');
-      }
-      const id = randomUUID();
-      this.db.prepare(`INSERT INTO messages(id,conversation_id,project,sender,recipient,body,kind,idempotency_key,reply_to,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id, parent?.conversation_id ?? randomUUID(), project, sender, input.to, input.body, input.kind, input.idempotencyKey, input.replyTo ?? null, now());
-      this.event(project, sender, 'queued', id);
-      if (parent) {
-        this.db.prepare('UPDATE messages SET acknowledged_at=COALESCE(acknowledged_at,?),delivered_at=COALESCE(delivered_at,?) WHERE id=?').run(now(), now(), parent.id);
-        this.event(project, sender, 'answered', String(parent.id));
-      }
-      return this.present(this.accessibleMessage(actor, id));
-    });
+    return this.transaction(() => this.createMessage(actor, input, project));
   }
+  private createMessage(actor: Actor, input: NewMessage, project: string): Row {
+    const sender = actor.role === 'admin' ? '@human' : actor.name;
+
+    const previous = this.db.prepare('SELECT * FROM messages WHERE project=? AND sender=? AND idempotency_key=?').get(project, sender, input.idempotencyKey);
+    if (previous) {
+      if (previous.recipient !== input.to || previous.body !== input.body || previous.kind !== input.kind || previous.reply_to !== (input.replyTo ?? null) || JSON.stringify(this.attachedIds(String(previous.id))) !== JSON.stringify([...(input.evidenceIds ?? [])].sort())) {
+        throw new HubError(409, 'Idempotency key already used for different content');
+      }
+      return this.present(previous);
+    }
+    if (this.paused()) throw new HubError(503, 'Delivery paused by administrator; retry later with the same idempotency key');
+    let parent: Row | undefined;
+    if (input.replyTo) {
+      parent = this.accessibleMessage(actor, input.replyTo);
+      if (parent.project !== project || parent.recipient !== sender || parent.sender !== input.to) throw new HubError(403, 'Only the recipient can reply to the original sender');
+    }
+    if (input.to === sender) throw new HubError(400, 'Self-messaging is disabled to prevent accidental loops');
+    if (input.to === '@human') {
+      if (!parent || parent.sender !== '@human') throw new HubError(400, 'Human messages must be replies');
+    } else {
+      const recipient = this.db.prepare('SELECT name FROM agents WHERE name=? AND project=? AND enabled=1').get(input.to, project);
+      if (!recipient) throw new HubError(404, 'Recipient not found in your project or disabled');
+    }
+    for (const evidenceId of input.evidenceIds ?? []) this.evidenceForProject(actor, evidenceId, project);
+    const id = randomUUID();
+    this.db.prepare(`INSERT INTO messages(id,conversation_id,project,sender,recipient,body,kind,idempotency_key,reply_to,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id, parent?.conversation_id ?? randomUUID(), project, sender, input.to, input.body, input.kind, input.idempotencyKey, input.replyTo ?? null, now());
+    for (const evidenceId of input.evidenceIds ?? []) this.db.prepare('INSERT INTO message_evidence VALUES(?,?)').run(id, evidenceId);
+    this.event(project, sender, 'queued', id);
+    if (parent) {
+      this.db.prepare('UPDATE messages SET acknowledged_at=COALESCE(acknowledged_at,?),delivered_at=COALESCE(delivered_at,?) WHERE id=?').run(now(), now(), parent.id);
+      this.event(project, sender, 'answered', String(parent.id));
+    }
+    return this.present(this.accessibleMessage(actor, id));
+  }
+
   inbox(actor: Actor, page: Page): Row {
     if (actor.role !== 'agent') throw new HubError(403, 'Agent credentials required');
     if (this.paused()) throw new HubError(503, 'Delivery paused by administrator');
@@ -198,6 +232,134 @@ export class Store {
         .all(id, actor.project, actor.name, actor.name, page.after, page.limit);
     return { items: rows.map(row => this.present(row)), nextCursor: rows.at(-1)?.seq ?? page.after };
   }
+  private attachedIds(messageId: string): string[] {
+    return this.db.prepare('SELECT evidence_id FROM message_evidence WHERE message_id=? ORDER BY evidence_id').all(messageId).map(row => String(row.evidence_id));
+  }
+  private evidenceForProject(actor: Actor, id: string, project: string): Row {
+    const row = this.accessibleEvidence(actor, id);
+    if (row.project !== project) throw new HubError(404, 'Evidence not found in this project');
+    return row;
+  }
+  private accessibleEvidence(actor: Actor, id: string): Row {
+    const row = this.db.prepare('SELECT * FROM evidence WHERE id=?').get(id);
+    if (!row) throw new HubError(404, 'Evidence not found');
+    if (actor.role === 'agent') {
+      const shared = this.db.prepare(`SELECT 1 FROM message_evidence me JOIN messages m ON m.id=me.message_id
+        WHERE me.evidence_id=? AND m.project=? AND (m.sender=? OR m.recipient=?) LIMIT 1`).get(id, actor.project, actor.name, actor.name);
+      if (row.project !== actor.project || (row.owner !== actor.name && !shared)) throw new HubError(404, 'Evidence not found');
+    }
+    return row;
+  }
+  private evidenceMetadata(row: Row): Row {
+    const { content, idempotency_key, ...metadata } = row;
+    return { ...metadata, reviews: this.db.prepare('SELECT reviewer,state,observed_sha256,note,reviewed_at FROM evidence_reviews WHERE evidence_id=? ORDER BY reviewer').all(row.id) };
+  }
+  uploadEvidence(actor: Actor, input: NewEvidence): Row {
+    if (actor.role !== 'agent') throw new HubError(403, 'Agent credentials required');
+    if (input.encoding === 'base64' && !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.content)) throw new HubError(400, 'Invalid base64 content');
+    const content = Buffer.from(input.content, input.encoding === 'base64' ? 'base64' : 'utf8');
+    if (!content.length || content.length > 65536) throw new HubError(413, 'Evidence must contain 1 to 65536 bytes');
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    return this.transaction(() => {
+      const previous = this.db.prepare('SELECT * FROM evidence WHERE project=? AND owner=? AND idempotency_key=?').get(actor.project, actor.name, input.idempotencyKey);
+      if (previous) {
+        if (previous.sha256 !== sha256 || previous.filename !== input.filename || previous.source_ref !== input.sourceRef || previous.media_type !== input.mediaType) throw new HubError(409, 'Evidence key already used for different content or provenance');
+        return this.evidenceMetadata(previous);
+      }
+      if (this.paused()) throw new HubError(503, 'Delivery paused by administrator');
+      const id = randomUUID();
+      this.db.prepare('INSERT INTO evidence VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id, actor.project, actor.name, input.filename, input.mediaType, input.sourceRef, sha256, content.length, content, input.idempotencyKey, now());
+      this.event(actor.project, actor.name, `evidence_uploaded:${id}`);
+      return this.evidenceMetadata(this.accessibleEvidence(actor, id));
+    });
+  }
+  getEvidence(actor: Actor, id: string, includeContent = true): Row {
+    const row = this.accessibleEvidence(actor, id);
+    const content = Buffer.from(row.content);
+    if (createHash('sha256').update(content).digest('hex') !== row.sha256) throw new HubError(500, 'Stored evidence checksum mismatch');
+    return { ...this.evidenceMetadata(row), checksumVerified: true, ...(includeContent ? { encoding: 'base64', content: content.toString('base64'), ...(['text/plain', 'text/markdown', 'application/json'].includes(row.media_type) ? { textContent: content.toString('utf8') } : {}) } : {}) };
+  }
+  reviewEvidence(actor: Actor, id: string, input: EvidenceReview): Row {
+    if (actor.role !== 'agent') throw new HubError(403, 'Agent credentials required');
+    return this.transaction(() => {
+      const row = this.getEvidence(actor, id, false);
+      if (input.observedSha256 !== row.sha256) throw new HubError(409, 'Observed evidence checksum does not match the stored copy');
+      const previous = this.db.prepare('SELECT * FROM evidence_reviews WHERE evidence_id=? AND reviewer=?').get(id, actor.name);
+      if (previous?.state === input.state && previous.note === input.note) return row;
+      this.db.prepare(`INSERT INTO evidence_reviews VALUES(?,?,?,?,?,?) ON CONFLICT(evidence_id,reviewer)
+        DO UPDATE SET state=excluded.state,observed_sha256=excluded.observed_sha256,note=excluded.note,reviewed_at=excluded.reviewed_at`)
+        .run(id, actor.name, input.state, input.observedSha256, input.note, now());
+      this.event(actor.project, actor.name, `evidence_${input.state}:${id}`);
+      return this.getEvidence(actor, id, false);
+    });
+  }
+  createHandoff(actor: Actor, input: NewHandoff): Row {
+    if (actor.role !== 'agent') throw new HubError(403, 'Agent credentials required');
+    return this.transaction(() => {
+      const packet = JSON.stringify(input);
+      const previous = this.db.prepare('SELECT * FROM handoffs WHERE project=? AND sender=? AND idempotency_key=?').get(actor.project, actor.name, input.idempotencyKey);
+      if (previous) {
+        if (previous.packet !== packet) throw new HubError(409, 'Handoff key already used for different context');
+        return this.getHandoff(actor, String(previous.id));
+      }
+      // Evidence, original context, notification and audit entry commit together.
+      const message = this.createMessage(actor, { to: input.to, body: `Handoff offered: ${input.objective}`, kind: 'message', idempotencyKey: `handoff:${input.idempotencyKey}`, evidenceIds: input.evidenceIds }, actor.project);
+      const id = randomUUID();
+      this.db.prepare('INSERT INTO handoffs(id,message_id,project,sender,recipient,packet,idempotency_key,updated_at) VALUES(?,?,?,?,?,?,?,?)')
+        .run(id, message.id, actor.project, actor.name, input.to, packet, input.idempotencyKey, now());
+      this.event(actor.project, actor.name, `handoff_offered:${id}`, String(message.id));
+      return this.getHandoff(actor, id);
+    });
+  }
+  getHandoff(actor: Actor, id: string): Row {
+    const row = this.db.prepare('SELECT * FROM handoffs WHERE id=?').get(id);
+    if (!row || (actor.role === 'agent' && (row.project !== actor.project || (row.sender !== actor.name && row.recipient !== actor.name)))) throw new HubError(404, 'Handoff not found');
+    const packet = JSON.parse(String(row.packet));
+    const evidence = this.attachedIds(String(row.message_id)).map(evidenceId => this.getEvidence(actor, evidenceId, false));
+    const updates = this.db.prepare('SELECT request FROM handoff_updates WHERE handoff_id=? ORDER BY rowid').all(id).map(item => JSON.parse(String(item.request)));
+    const completionEvidence = row.completion_message_id ? this.attachedIds(String(row.completion_message_id)).map(evidenceId => this.getEvidence(actor, evidenceId, false)) : [];
+    return { ...row, packet, evidence, updates, completionEvidence };
+  }
+  listHandoffs(actor: Actor, page: Page): Row {
+    const rows = actor.role === 'admin'
+      ? this.db.prepare('SELECT id,seq FROM handoffs WHERE seq>? ORDER BY seq LIMIT ?').all(page.after, page.limit)
+      : this.db.prepare('SELECT id,seq FROM handoffs WHERE project=? AND (sender=? OR recipient=?) AND seq>? ORDER BY seq LIMIT ?').all(actor.project, actor.name, actor.name, page.after, page.limit);
+    return { items: rows.map(row => this.getHandoff(actor, String(row.id))), nextCursor: rows.at(-1)?.seq ?? page.after };
+  }
+  updateHandoff(actor: Actor, id: string, input: HandoffUpdate): Row {
+    if (actor.role !== 'agent') throw new HubError(403, 'Agent credentials required');
+    return this.transaction(() => {
+      const handoff = this.getHandoff(actor, id);
+      if (handoff.recipient !== actor.name) throw new HubError(403, 'Only the receiving agent can accept, decline or complete this handoff');
+      const previous = this.db.prepare('SELECT request FROM handoff_updates WHERE handoff_id=? AND idempotency_key=?').get(id, input.idempotencyKey);
+      if (previous) {
+        if (previous.request !== JSON.stringify(input)) throw new HubError(409, 'Update key already used for a different decision');
+        return handoff;
+      }
+      if (this.paused()) throw new HubError(503, 'Delivery paused by administrator');
+      if ((input.state === 'accepted' || input.state === 'declined') && handoff.state !== 'offered') throw new HubError(409, 'Only an offered handoff can be accepted or declined');
+      if (input.state === 'completed' && handoff.state !== 'accepted') throw new HubError(409, 'Accept the handoff before reporting completion');
+      if (input.state !== 'declined') {
+        for (const evidence of handoff.evidence) {
+          const receipt = this.db.prepare('SELECT state FROM evidence_reviews WHERE evidence_id=? AND reviewer=?').get(evidence.id, actor.name);
+          if (receipt?.state !== 'reviewed') throw new HubError(409, 'Review every transferred evidence item before accepting or completing');
+        }
+      }
+      if (input.state === 'completed' && !input.evidenceIds.length) throw new HubError(400, 'Completion requires new result evidence');
+      if (input.state !== 'completed' && input.evidenceIds.length) throw new HubError(400, 'Attach result evidence when completing the handoff');
+      if (input.state === 'completed') for (const evidenceId of input.evidenceIds) {
+        const evidence = this.evidenceForProject(actor, evidenceId, actor.project);
+        if (evidence.owner !== actor.name || handoff.packet.evidenceIds.includes(evidenceId)) throw new HubError(400, 'Completion evidence must be a result uploaded by the receiving agent');
+      }
+      const message = this.createMessage(actor, { to: handoff.sender, body: `Handoff ${input.state}: ${input.note}`, kind: 'message', replyTo: handoff.message_id, idempotencyKey: `handoff-update:${id}:${input.idempotencyKey}`, evidenceIds: input.evidenceIds }, actor.project);
+      this.db.prepare('INSERT INTO handoff_updates VALUES(?,?,?)').run(id, input.idempotencyKey, JSON.stringify(input));
+      this.db.prepare('UPDATE handoffs SET state=?,updated_at=?,completion_message_id=COALESCE(?,completion_message_id) WHERE id=?')
+        .run(input.state, now(), input.state === 'completed' ? message.id : null, id);
+      this.event(actor.project, actor.name, `handoff_${input.state}:${id}`, String(message.id));
+      return this.getHandoff(actor, id);
+    });
+  }
+
   dashboard(actor: Actor, page: Page, project?: string, before = Number.MAX_SAFE_INTEGER): Row {
     requireAdmin(actor);
     const rows = project

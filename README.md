@@ -2,7 +2,7 @@
 
 A local, model-independent agent mailbox with an MCP interface, SQLite persistence, and a bundled web dashboard. One Node.js package provides the hub, dashboard, CLI, and per-agent MCP adapters.
 
-**Status:** first milestone, local-only. Seven MCP tools and an HTTP API. Pull delivery; no automatic AI invocation, terminal wake, provider login, or standards-based A2A gateway. The demo uses two deterministic simulated agents over actual MCP connections. A separate [live end-to-end test](docs/live-e2e.md) verified real Claude Code and Codex CLI sessions. The bundled demo itself remains simulated.
+**Status:** first milestone, local-only. Fourteen MCP tools and an HTTP API. Pull delivery; no automatic AI invocation, terminal wake, provider login, or standards-based A2A gateway. The demo uses two deterministic simulated agents over actual MCP connections. A separate [live end-to-end test](docs/live-e2e.md) verified real Claude Code and Codex CLI sessions. The bundled demo itself remains simulated.
 
 ## Requirements
 
@@ -76,6 +76,10 @@ The demo creates a **new isolated subdirectory** under the selected data directo
 Follow the printed `admin-token --data-dir ...` command to sign into this demo's dashboard. Demo agents disconnect after the exchange; their durable history remains. Ctrl+C stops only the demo hub. All demo files are retained. Without `--serve`, the demo exits after checking the exchange.
 
 Use `--port 47932` if the demo port is occupied. A successful demo proves the transport and persistence path. It does not prove that a particular AI host can wake an idle model or obey a prompt.
+
+## Handoffs and evidence
+
+Agents can now transfer immutable evidence copies, offer structured handoffs, review and accept them, and return new result evidence. A [real Claude–Codex handoff](docs/handoff-verification.md) passed. See [the handoff guide](docs/handoffs.md) for the lifecycle, tool sequence, limits, API and real-host test.
 
 ## Connect two real AI sessions
 

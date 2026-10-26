@@ -42,7 +42,7 @@ function logout() {
   token = ''; sessionStorage.removeItem('amh.dashboard.token'); clearInterval(polling);
   $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('connection').textContent = 'Sign in to connect';
-  $('messages').replaceChildren(); $('agents').replaceChildren(); $('events').replaceChildren(); $('thread').replaceChildren();
+  $('messages').replaceChildren(); $('agents').replaceChildren(); $('events').replaceChildren(); $('thread').replaceChildren(); $('handoff-detail').replaceChildren();
   snapshot = undefined; instanceId = undefined; threadId = undefined; replyTo = undefined;
   createdCredentials = undefined; $('new-credentials').hidden = true;
 }
@@ -77,6 +77,7 @@ function messageCard(message, inThread = false) {
   const timestamp = element('time', time(message.created_at)); timestamp.dateTime = message.created_at; route.append(timestamp);
   const footer = element('div', undefined, 'message-footer');
   footer.append(element('span', message.status, `status ${message.status}`), element('span', message.project, 'project-tag'), element('span', message.kind));
+  if (message.handoff) footer.append(action(`Handoff: ${message.handoff.state}`, () => openHandoff(message.handoff.id)));
   if (!inThread) footer.append(action('View conversation', () => openThread(message.conversation_id)));
   if (message.recipient === '@human') {
     footer.append(action('Reply', () => {
@@ -88,6 +89,11 @@ function messageCard(message, inThread = false) {
     if (!message.acknowledged_at) footer.append(action('Acknowledge', async () => { await api(`/api/messages/${message.id}/ack`, 'POST'); await refresh(); }));
   }
   card.append(route, element('p', message.body, 'message-body'), footer);
+  if (message.evidence?.length) {
+    const attachments = element('div', undefined, 'evidence-list mt-3');
+    for (const item of message.evidence) attachments.append(evidenceLink(item));
+    card.append(attachments);
+  }
   return card;
 }
 async function refresh() {
@@ -124,6 +130,46 @@ async function refresh() {
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()} · Refreshes every 4 seconds. Older message pages reset on refresh.`;
   } finally { refreshing = false; }
 }
+function evidenceLink(item) {
+  const row = element('div', undefined, 'evidence-item');
+  row.append(action(`Download ${item.filename} (${item.size} bytes)`, () => downloadEvidence(item.id)));
+  row.append(element('div', `SHA-256: ${item.sha256}`, 'small text-secondary evidence-hash'));
+  row.append(element('div', `Source: ${item.source_ref}`, 'small text-secondary evidence-hash'));
+  for (const receipt of item.reviews ?? []) row.append(element('div', `${receipt.reviewer}: ${receipt.state} — ${receipt.note}`, 'small text-secondary'));
+  return row;
+}
+async function downloadEvidence(id) {
+  const item = await api(`/api/evidence/${id}?content=true`);
+  const bytes = Uint8Array.from(atob(item.content), character => character.charCodeAt(0));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const sha = [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+  if (sha !== item.sha256) throw new Error('Downloaded evidence checksum mismatch; file was not saved.');
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+  const link = element('a'); link.href = url; link.download = item.filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function openHandoff(id) {
+  const item = await api(`/api/handoffs/${id}`);
+  const panel = $('handoff-detail'); panel.replaceChildren();
+  panel.append(element('p', `${item.sender} → ${item.recipient} · ${item.state}`, 'fw-semibold'), element('h3', item.packet.objective, 'h6'), element('p', item.packet.context, 'message-body'));
+  panel.append(element('p', `Workspace reference: ${item.packet.workspaceRef}`, 'small text-secondary evidence-hash'));
+  for (const [label, field] of [['Completed before transfer', 'completed'], ['Remaining at transfer', 'remaining'], ['Next steps', 'nextSteps']]) {
+    panel.append(element('h3', label, 'h6 mt-3'));
+    const list = element('ul', undefined, 'small');
+    for (const entry of item.packet[field]) list.append(element('li', entry));
+    panel.append(list);
+  }
+  panel.append(element('h3', 'Transferred evidence', 'h6 mt-3'));
+  for (const entry of item.evidence) panel.append(evidenceLink(entry));
+  for (const update of item.updates) panel.append(element('p', `${update.state}: ${update.note}`, 'small mt-3'));
+  if (item.completionEvidence.length) {
+    panel.append(element('h3', 'Result evidence', 'h6 mt-3'));
+    for (const entry of item.completionEvidence) panel.append(evidenceLink(entry));
+  }
+  panel.append(element('p', 'Review and completion are agent claims. Checksums verify transferred bytes; they do not prove the claims are correct.', 'panel-footnote mt-3'));
+  $('handoff-panel').hidden = false;
+  $('handoff-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 async function openThread(id) {
   threadId = id; threadCursor = 0; $('thread').replaceChildren(); $('thread-panel').hidden = false;
   await moreThread(); $('thread-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -154,6 +200,7 @@ $('project-filter').addEventListener('change', () => run(refresh));
 $('message-project').addEventListener('input', fillRecipients);
 $('pause').addEventListener('click', () => run(async () => { await api('/api/pause', 'POST', { paused: !snapshot.paused }); await refresh(); }));
 $('cancel-reply').addEventListener('click', cancelReply);
+$('close-handoff').addEventListener('click', () => { $('handoff-panel').hidden = true; });
 $('close-thread').addEventListener('click', () => { $('thread-panel').hidden = true; threadId = undefined; });
 $('thread-more').addEventListener('click', () => run(moreThread));
 $('older').addEventListener('click', () => run(async () => {

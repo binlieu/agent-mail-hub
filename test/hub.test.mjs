@@ -118,7 +118,7 @@ test('HTTP rejects cross-origin access, unsafe host, oversized payloads and inva
       req.on('error', reject); req.end();
     });
     assert.equal(unsafeHost, 403);
-    assert.equal((await f.api(f.a.token, '/api/messages', 'POST', { ...message('bob'), body: 'x'.repeat(70000) })).status, 413);
+    assert.equal((await f.api(f.a.token, '/api/messages', 'POST', { ...message('bob'), body: 'x'.repeat(150000) })).status, 413);
     assert.equal((await f.api(f.a.token, '/api/messages', 'POST', { ...message('bob'), body: '' })).status, 400);
     assert.equal((await f.api(f.a.token, '/api/inbox?limit=999')).status, 400);
     assert.equal((await f.api(f.a.token, '/api/inbox?after=-1')).status, 400);
@@ -174,7 +174,7 @@ test('bounded inbox and dashboard pagination remain complete', async () => {
   } finally { await f.hub.close(); }
 });
 
-test('two real MCP stdio clients exchange a question and reply with seven tools', async () => {
+test('two real MCP stdio clients exchange a question and reply with fourteen tools', async () => {
   const f = await fixture();
   const clients = []; const transports = [];
   try {
@@ -186,7 +186,7 @@ test('two real MCP stdio clients exchange a question and reply with seven tools'
       const client = new Client({ name: `test-${agent.name}`, version: '1.0.0' }); clients.push(client);
       await client.connect(transport);
     }
-    const tools = await clients[0].listTools(); assert.equal(tools.tools.length, 7);
+    const tools = await clients[0].listTools(); assert.equal(tools.tools.length, 14);
     const call = async (index, name, args) => {
       const result = await clients[index].callTool({ name, arguments: args });
       assert.ok(!result.isError, JSON.stringify(result));
@@ -238,7 +238,7 @@ test('legacy 2025 MCP handshake works without protocol noise on stdout', async (
     const opening = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'legacy-test', version: '1.0.0' } });
     assert.equal(opening.result.protocolVersion, '2025-11-25');
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-    const tools = await rpc('tools/list', {}); assert.equal(tools.result.tools.length, 7);
+    const tools = await rpc('tools/list', {}); assert.equal(tools.result.tools.length, 14);
     const result = await rpc('tools/call', { name: 'list_agents', arguments: {} });
     assert.equal(JSON.parse(result.result.content[0].text).items.length, 3);
     assert.deepEqual(malformed, []);

@@ -53,6 +53,24 @@ try {
   await page.getByText('Human response in the same thread', { exact: true }).waitFor();
   const followup = hub.store.dashboard(admin, { after: 0, limit: 50 }).messages.find(message => message.body === 'Human response in the same thread');
   assert.equal(followup.conversation_id, sent.conversation_id);
+  const inputEvidence = hub.store.uploadEvidence({ role: 'agent', name: 'planner', project: 'demo' }, { filename: 'fixture.json', mediaType: 'application/json', encoding: 'utf8', content: '{"values":[2,3],"declaredTotal":6}', sourceRef: 'scratch://planner/fixture.json', idempotencyKey: 'ui-evidence' });
+  const handoff = hub.store.createHandoff({ role: 'agent', name: 'planner', project: 'demo' }, { to: 'builder', objective: 'Verify the transferred fixture', context: 'Continue the arithmetic verification.', completed: ['Prepared input'], remaining: ['Calculate total'], nextSteps: ['Review source evidence'], workspaceRef: 'scratch://ui-handoff', evidenceIds: [inputEvidence.id], idempotencyKey: 'ui-handoff' });
+  const receiver = { role: 'agent', name: 'builder', project: 'demo' };
+  hub.store.reviewEvidence(receiver, inputEvidence.id, { observedSha256: inputEvidence.sha256, state: 'reviewed', note: 'Read the source fixture.' });
+  hub.store.updateHandoff(receiver, handoff.id, { state: 'accepted', note: 'Taking the next step.', evidenceIds: [], idempotencyKey: 'ui-accept' });
+  const resultEvidence = hub.store.uploadEvidence(receiver, { filename: 'result.json', mediaType: 'application/json', encoding: 'utf8', content: '{"calculatedTotal":5,"matches":false}', sourceRef: 'scratch://builder/result.json', idempotencyKey: 'ui-result' });
+  hub.store.updateHandoff(receiver, handoff.id, { state: 'completed', note: 'Detected a mismatched declared total.', evidenceIds: [resultEvidence.id], idempotencyKey: 'ui-complete' });
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.getByRole('button', { name: 'Handoff: completed', exact: true }).click();
+  await page.getByRole('heading', { name: 'Verify the transferred fixture', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Result evidence', exact: true }).waitFor();
+  const evidenceDownload = page.waitForEvent('download');
+  await page.locator('#handoff-detail').getByRole('button', { name: /^Download fixture\.json/ }).click();
+  const transferredFile = await evidenceDownload;
+  const transferredPath = join(directory, 'downloaded-evidence.json');
+  await transferredFile.saveAs(transferredPath);
+  assert.equal(readFileSync(transferredPath, 'utf8'), '{"values":[2,3],"declaredTotal":6}');
+  await page.getByRole('button', { name: 'Close handoff', exact: true }).click();
   await page.getByText('Register an agent', { exact: true }).click();
   await page.getByLabel('Unique name').fill('browser-agent');
   await page.locator('#agent-project').fill('demo');
@@ -80,5 +98,5 @@ try {
   await page.getByRole('heading', { name: 'Connect to your hub' }).waitFor();
   assert.equal(await page.evaluate(() => sessionStorage.getItem('amh.dashboard.token')), null);
   assert.deepEqual(errors, []);
-  console.log(`PASS: dashboard sign-in, literal text/XSS, conversations, pause/resume, human send/reply, registration/download, disable/enable, mobile layout and sign-out.\nBrowser artifacts: ${directory}`);
+  console.log(`PASS: dashboard sign-in, literal text/XSS, conversations, pause/resume, human send/reply, registration/download, disable/enable, mobile layout, handoff context/result display, checksum-verified evidence download and sign-out.\nBrowser artifacts: ${directory}`);
 } finally { await browser.close(); await hub.close(); }

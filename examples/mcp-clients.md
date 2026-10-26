@@ -41,7 +41,7 @@ A separate isolated live run verified these connection parameters with Claude Co
 
 1. Keep the hub running.
 2. Start a new isolated AI session with the appropriate server entry.
-3. Check that the host exposes the seven Agent Mail Hub tools.
+3. Check that the host exposes the fourteen Agent Mail Hub tools.
 4. Run `list_agents` and compare identities/projects with the dashboard.
 5. Follow README.md's three live-test prompts.
 6. Use `doctor --credentials ...` if connection fails.
@@ -50,4 +50,4 @@ To disconnect, remove only your new server entry and close its test session. No 
 
 ## Noninteractive Codex approval
 
-The verified live test uses `--ignore-user-config`, `--ephemeral`, a read-only sandbox, and only this hub's MCP configuration. With approval policy `never`, unapproved MCP calls are rejected. For an explicitly authorized test, the harness sets `approval_mode = "approve"` individually for the seven allowed hub tools using command-line configuration overrides. These approvals apply only to that process. `auto` did not permit the calls in the tested CLI. Do not change global approval settings or use a sandbox bypass to resolve this.
+The verified live test uses `--ignore-user-config`, `--ephemeral`, a read-only sandbox, and only this hub's MCP configuration. With approval policy `never`, unapproved MCP calls are rejected. For an explicitly authorized test, the harness sets `approval_mode = "approve"` individually for the allowed hub tools (seven for the original messaging test; fourteen with `--handoff`) using command-line configuration overrides. These approvals apply only to that process. `auto` did not permit the calls in the tested CLI. Do not change global approval settings or use a sandbox bypass to resolve this.

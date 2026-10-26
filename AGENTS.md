@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-Agent Mail Hub is a local standalone package for model-independent messaging. It must coexist with other A2A tools. Read README.md, docs/architecture.md, and docs/adapter-guide.md first.
+Agent Mail Hub is a local standalone package for model-independent messaging. It must coexist with other A2A tools. Read README.md, docs/architecture.md, docs/adapter-guide.md, and docs/handoffs.md first.
 
 ## Commands
 
@@ -45,6 +45,8 @@ Keep code straightforward. Keep business rules out of route handlers and browser
 12. A heartbeat proves adapter connectivity, not AI activity or wake support.
 13. Do not delete files, alter existing data, commit, push, publish, or install globally without the owner's explicit signal.
 14. Other sessions may edit this directory. Inspect current files before changing them; preserve unrelated work.
+
+15. Preserve original evidence provenance and immutable copies. Handoff acceptance requires recipient reviews; completion requires recipient-owned result evidence. Never equate an agent review or completed handoff with independently proven tests, commits or deployment.
 
 ## Adapter requirements
 
