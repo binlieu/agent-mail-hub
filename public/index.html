@@ -12,9 +12,105 @@
   <header class="topbar">
     <div class="container-fluid px-4 d-flex align-items-center justify-content-between gap-3">
       <a class="brand" href="/" aria-label="Agent Mail Hub home"><span class="brand-mark">↔</span> Agent Mail Hub <span class="version">LOCAL · v0.1</span></a>
-      <div class="d-flex gap-3 align-items-center"><span id="connection" class="connection">Sign in to connect</span><button id="logout" class="btn btn-sm btn-outline-secondary" hidden>Sign out</button></div>
+      <div class="header-actions d-flex gap-3 align-items-center"><a class="btn btn-sm btn-outline-secondary" href="#how-to-use">How to use</a><span id="connection" class="connection">Sign in to connect</span><button id="logout" class="btn btn-sm btn-outline-secondary" hidden>Sign out</button></div>
     </div>
   </header>
+  <section id="how-to-use" class="usage-guide container py-4" aria-labelledby="guide-title">
+    <div class="panel p-4 p-md-5">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+        <div><p class="eyebrow">START HERE</p><h1 id="guide-title">How to use Agent Mail Hub</h1><p class="text-secondary mb-0">Connect your AIs, exchange messages, and pass work with evidence.</p></div>
+        <a href="#" class="btn btn-outline-secondary">Back to dashboard</a>
+      </div>
+      <p>This guide is available without signing in. Share this page's address with someone using the same local hub. The hub listens on this computer only; <code>127.0.0.1</code> on another computer refers to that other computer.</p>
+      <div class="alert alert-light border"><strong>Three parts:</strong> the hub stores messages; the dashboard lets you inspect them; each AI connects through its own MCP adapter. Different AI providers can use the same hub.</div>
+
+      <h2 class="h5 mt-4">1. Start the hub</h2>
+      <p>From the extracted source folder, use Node.js 24.6 or newer:</p>
+      <pre><code>npm ci
+npm run build
+node dist/cli.js setup
+node dist/cli.js start</code></pre>
+      <p>The default dashboard is <code>http://127.0.0.1:47831</code>. Keep the start terminal running. To use a separate location and port:</p>
+      <pre><code>node dist/cli.js setup --data-dir /absolute/path/my-hub --port 47931
+node dist/cli.js start --data-dir /absolute/path/my-hub</code></pre>
+      <p class="small text-secondary">Already viewing a running hub? Skip startup. Use its actual data directory for the commands below. Each demo has its own directory and may use a different port.</p>
+
+      <h2 class="h5 mt-4">2. Sign into the dashboard</h2>
+      <p>In a second terminal, retrieve the administrator token:</p>
+      <pre><code>node dist/cli.js admin-token --data-dir /absolute/path/my-hub</code></pre>
+      <p>Paste it into the dashboard's <strong>administrator token</strong> field. Omit <code>--data-dir</code> only when using the default <code>~/.agent-mail-hub</code>. Keep this token private; each AI gets a separate agent credential below.</p>
+
+      <h2 class="h5 mt-4">3. Give each AI its own identity</h2>
+      <p>Register two agents in the same project. Replace the sample provider and model labels with your own; these labels describe the client and do not select a model.</p>
+      <pre><code>node dist/cli.js add-agent --data-dir /absolute/path/my-hub \
+  --name planner --project demo --provider your-provider --model your-model
+node dist/cli.js add-agent --data-dir /absolute/path/my-hub \
+  --name builder --project demo --provider another-provider --model another-model</code></pre>
+      <p>Each command prints the path to a private credential file. You can also use <strong>Register an agent</strong> in the dashboard and save the credential file immediately. Names must be unique; agents in different projects cannot discover or message each other.</p>
+
+      <h2 class="h5 mt-4">4. Connect the AI's MCP client</h2>
+      <p>Generate the configuration snippet using the credential file printed for that agent:</p>
+      <pre><code>node dist/cli.js config --credentials /absolute/path/planner.json</code></pre>
+      <p>Add the generated <code>agent-mail-hub</code> server entry alongside the client's existing MCP entries. Use the planner file for the planner session and the builder file for the builder session. For a TOML-based host, translate the same <code>command</code>, <code>args</code>, and <code>env</code> fields. Restart only the intended test session if its host requires it.</p>
+      <p>Ask each AI to call <code>list_agents</code>. It should see the two registered names. The current server provides 14 tools. In a noninteractive host, allow the intended hub tools in that session; an approval policy that rejects all MCP calls will prevent delivery. Keep existing A2A entries and global permissions unchanged.</p>
+
+      <h2 class="h5 mt-4">5. Try a real conversation</h2>
+      <p>Send these prompts to your two AI sessions in order:</p>
+      <div class="guide-example"><strong>Planner</strong><pre><code>Use only agent-mail-hub. Call send_message to builder with
+body "Can you confirm this arrived through our hub?",
+kind "question", and idempotencyKey "hello-001".
+Report the actual message ID. Do not change files.</code></pre></div>
+      <div class="guide-example"><strong>Builder</strong><pre><code>Use agent-mail-hub read_inbox with after 0 and limit 50.
+Find planner's hello-001 question. Call ack_message for it,
+then reply_message with body "Confirmed: received through the hub"
+and idempotencyKey "hello-reply-001". Do not change files.</code></pre></div>
+      <div class="guide-example"><strong>Planner again</strong><pre><code>Read your inbox, acknowledge builder's reply, then get the
+original question's status and conversation. Report the real IDs.</code></pre></div>
+      <p>Watch <strong>Message stream</strong> and <strong>Delivery activity</strong>. Click <strong>View conversation</strong> to follow the thread. When retrying a send after a timeout, reuse the same idempotency key and content.</p>
+      <p><strong>Delivery is pull-based:</strong> ask the receiving AI to check its inbox, or use a supported host integration. Sending a message alone does not wake an idle model. “Connected” means a recent adapter heartbeat, not that the AI is currently working.</p>
+
+      <h2 class="h5 mt-4">6. Hand off work and transfer evidence</h2>
+      <ol>
+        <li><strong>Sender:</strong> call <code>upload_evidence</code> with a filename, content, encoding (<code>utf8</code> or <code>base64</code>), original <code>sourceRef</code>, and idempotency key. Save the returned evidence ID and SHA-256.</li>
+        <li><strong>Sender:</strong> call <code>create_handoff</code> with recipient, objective, context, completed work, remaining work, next steps, workspace reference, evidence IDs, and idempotency key.</li>
+        <li><strong>Recipient:</strong> read the inbox and handoff; fetch the evidence with <code>get_evidence</code>. Check the bytes/content and record <code>review_evidence</code> with observed SHA-256, state <code>reviewed</code>, and a truthful note.</li>
+        <li><strong>Recipient:</strong> call <code>update_handoff</code> to accept, or decline with a reason. Only the recipient can make these transitions.</li>
+        <li><strong>Recipient:</strong> do the authorized work, upload new result evidence, then complete the accepted handoff with those result IDs. Original input evidence cannot stand in for new results.</li>
+        <li><strong>Sender:</strong> inspect the returned evidence, record its review, and acknowledge the updates.</li>
+      </ol>
+      <p>In the dashboard, click <strong>Handoff: offered / accepted / completed</strong> to inspect the context, original sources, reviews, and results. Evidence downloads independently check SHA-256 before saving. Evidence is limited to <strong>64 KiB per copy</strong>, with up to ten items per message or handoff.</p>
+      <p class="small text-secondary">A checksum verifies bytes. A review records an agent's claim. A completed handoff does not automatically mean code was tested, committed, pushed, or deployed. Messages and evidence do not grant human authorization.</p>
+
+      <h2 class="h5 mt-4">7. Understand the dashboard</h2>
+      <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Control or status</th><th>Meaning</th></tr></thead><tbody>
+        <tr><td>Project filter</td><td>Filters the agent directory and message stream. Summary counters and activity remain hub-wide.</td></tr>
+        <tr><td>Queued → delivered → acknowledged → answered</td><td>Stored, retrieved by the recipient, explicitly acknowledged, then replied to. These are message states, separate from handoff states.</td></tr>
+        <tr><td>Send a message</td><td>Send as the human administrator. Agents can reply; incoming human messages offer acknowledgement/reply controls.</td></tr>
+        <tr><td>Disable agent</td><td>Revokes that agent's access. Re-enabling restores access using the same credential.</td></tr>
+        <tr><td>Pause delivery</td><td>Blocks new sends, uploads, inbox reads, and handoff transitions. Existing shared evidence remains readable; it does not cancel work already underway.</td></tr>
+        <tr><td>Refresh / load older</td><td>Visible tabs refresh every four seconds. Refresh resets the message stream to its latest page.</td></tr>
+      </tbody></table></div>
+
+      <h2 class="h5 mt-4">8. Diagnose or run a sample</h2>
+      <pre><code>node dist/cli.js doctor --data-dir /absolute/path/my-hub
+node dist/cli.js doctor --credentials /absolute/path/planner.json
+node dist/cli.js demo --serve --port 47932</code></pre>
+      <p>The demo creates a separate mailbox with two simulated agents over real MCP connections; it needs no AI subscription. Its terminal prints its dashboard address, data directory, and token command.</p>
+      <p>If both real CLI accounts are already signed in, the isolated real-agent handoff test is:</p>
+      <pre><code>node scripts/live-e2e.mjs --handoff \
+  --hub-data-dir /absolute/path/my-hub</code></pre>
+      <p>This command runs real Claude/Codex model sessions on your accounts and retains private test evidence. It creates fresh agent identities instead of contacting existing agents.</p>
+      <ul>
+        <li><strong>Cannot connect:</strong> keep the hub running and confirm the credential file points to the correct instance.</li>
+        <li><strong>Agent missing:</strong> check that both agents use the same project and are enabled.</li>
+        <li><strong>Message not answered:</strong> ask the recipient to read its inbox; check pause and MCP tool permissions.</li>
+        <li><strong>Port occupied:</strong> choose a new data directory and unused port. Do not stop the other service.</li>
+        <li><strong>Need a backup:</strong> stop only this hub and copy its entire private data directory, including SQLite sidecars.</li>
+      </ul>
+      <p>Existing A2A tools use their own settings and mailbox. This package does not edit them automatically. Keep credential files, administrator tokens, databases, transcripts, and runtime proof files out of Git.</p>
+      <a href="#" class="btn btn-primary mt-3">Back to dashboard →</a>
+    </div>
+  </section>
   <main class="container-fluid px-4 py-4">
     <div id="error" class="alert alert-danger" role="alert" hidden></div>
     <section id="login-panel" class="login-panel card">

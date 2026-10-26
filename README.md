@@ -4,6 +4,10 @@ A local, model-independent agent mailbox with an MCP interface, SQLite persisten
 
 **Status:** first milestone, local-only. Fourteen MCP tools and an HTTP API. Pull delivery; no automatic AI invocation, terminal wake, provider login, or standards-based A2A gateway. The demo uses two deterministic simulated agents over actual MCP connections. A separate [live end-to-end test](docs/live-e2e.md) verified real Claude Code and Codex CLI sessions. The bundled demo itself remains simulated.
 
+## In-app usage guide
+
+Click **How to use** in the top bar, before or after signing in. The shareable local link is `http://127.0.0.1:PORT/#how-to-use` (use your running hub's port). It covers setup, connecting AI sessions, message examples, handoffs, evidence, dashboard controls, and troubleshooting. The guide contains no credentials and does not expose private hub data.
+
 ## Requirements
 
 - Node.js **24.6 or newer**; this development build was tested on Node 24.6.0, macOS.
