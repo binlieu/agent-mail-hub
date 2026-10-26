@@ -28,6 +28,25 @@ export const heartbeatSchema = z.object({
   host: z.string().trim().min(1).max(100).default('custom'),
   connected: z.boolean().default(true)
 }).strict();
+const tokenAmount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export const usageSchema = z.object({
+  provider: z.enum(['claude', 'codex']),
+  source: z.enum(['claude-statusline', 'claude-stream', 'codex-session', 'codex-exec']),
+  sessionId: identifier,
+  observedAt: z.iso.datetime(),
+  context: z.object({
+    usedTokens: tokenAmount.nullable(), windowTokens: tokenAmount.positive().nullable(),
+    usedPercent: z.number().min(0).max(100).nullable(), observedAt: z.iso.datetime()
+  }).strict().nullable(),
+  sessionTokens: tokenAmount.nullable(),
+  sessionTokensObservedAt: z.iso.datetime().nullable(),
+  limits: z.array(z.object({
+    id: z.string().min(1).max(80), label: z.string().min(1).max(80),
+    usedPercent: z.number().min(0).max(10000), windowMinutes: z.number().int().positive().nullable(),
+    resetsAt: z.iso.datetime().nullable(), observedAt: z.iso.datetime()
+  }).strict()).max(12)
+}).strict().refine(value => value.source.startsWith(value.provider), 'Usage source must match provider');
+export type UsageReport = z.infer<typeof usageSchema>;
 export type NewAgent = z.infer<typeof agentSchema>;
 export type NewMessage = z.infer<typeof messageSchema>;
 export type Page = z.infer<typeof pageSchema>;

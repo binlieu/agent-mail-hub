@@ -9,6 +9,8 @@ let createdCredentials;
 let before;
 let threadId;
 let threadCursor = 0;
+let threadRequest = 0;
+let threadTrigger;
 let refreshing = false;
 let instanceId;
 let registrationOptions;
@@ -79,6 +81,7 @@ function action(label, handler, className = 'text-action') {
 async function run(work) { try { error(''); await work(); } catch (failure) { error(failure.message); } }
 function empty(container, message) { container.replaceChildren(element('p', message, 'empty')); }
 function logout() {
+  closeThread();
   token = ''; sessionStorage.removeItem('amh.dashboard.token'); clearInterval(polling);
   $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('connection').textContent = 'Sign in to connect';
@@ -93,9 +96,44 @@ function fillRecipients() {
   $('recipient').replaceChildren(...agents.map(agent => new Option(agent.name, agent.name)));
   if (agents.some(agent => agent.name === selected)) $('recipient').value = selected;
 }
+function renderUsage(usage, name, expanded) {
+  const panel = element('section', undefined, 'agent-usage');
+  const details = element('details', undefined, 'usage-details');
+  details.dataset.agentUsage = name; details.open = expanded;
+  details.append(element('summary', `Usage details${usage?.stale ? ' · Stale reading' : ''}`));
+  const format = value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 });
+  const metric = (label, value, stale = false) => {
+    const row = element('div', undefined, 'usage-metric');
+    row.append(element('strong', label), element('span', value + (stale ? ' · Stale' : '')));
+    panel.append(row);
+  };
+  const ctx = usage?.context;
+  metric('Context', ctx?.usedPercent !== null && ctx?.usedPercent !== undefined ? `${format(ctx.usedPercent)}% used · ${format(ctx.remainingPercent)}% free` : 'Unavailable', ctx?.stale);
+  if (ctx?.usedPercent !== null && ctx?.usedPercent !== undefined) {
+    const progress = element('progress', `${format(ctx.usedPercent)}% used`, ctx.stale ? 'usage-progress stale' : 'usage-progress');
+    progress.max = 100; progress.value = ctx.usedPercent; progress.setAttribute('aria-label', 'Context used'); panel.append(progress);
+  }
+  if (ctx?.usedTokens !== null && ctx?.usedTokens !== undefined) panel.append(element('div', `${format(ctx.usedTokens)}${ctx.windowTokens === null ? '' : ` / ${format(ctx.windowTokens)}`} context tokens${ctx.remainingTokens === null ? '' : ` · ${format(ctx.remainingTokens)} left`}`, 'usage-detail'));
+  if (ctx) details.append(element('div', `Context observed ${time(ctx.observedAt)}`, 'usage-detail'));
+  if (usage?.sessionTokens !== null && usage?.sessionTokens !== undefined) {
+    if (!ctx?.usedTokens) panel.append(element('div', `Tokens consumed: ${format(usage.sessionTokens)}${usage.tokensStale ? ' · Stale' : ''}`, 'usage-detail'));
+    details.append(element('div', `Reported token usage: ${format(usage.sessionTokens)} (not remaining allowance) · ${time(usage.sessionTokensObservedAt)}${usage.tokensStale ? ' · Stale' : ''}`, 'usage-detail'));
+  }
+  if (!usage?.limits?.length) metric('Account allowance', 'Unavailable');
+  for (const window of usage?.limits || []) {
+    const duration = window.windowMinutes === null ? window.label : window.windowMinutes >= 1440 ? `${format(window.windowMinutes / 1440)}-day` : window.windowMinutes >= 60 ? `${format(window.windowMinutes / 60)}-hour` : `${window.windowMinutes}-minute`;
+    metric(`Shared ${duration} allowance`, window.expired ? `Expired reading · last ${format(window.remainingPercent)}% left` : `${format(window.remainingPercent)}% left`, window.stale);
+    details.append(element('div', `${window.label} · Observed ${time(window.observedAt)}${window.resetsAt ? ` · Resets ${time(window.resetsAt)}` : ''}`, 'usage-detail'));
+  }
+  if (usage?.limits?.length) details.append(element('div', 'Allowance is shared by sessions on that account; it is not a token balance.', 'usage-detail'));
+  details.append(element('div', usage ? `Host reported · ${usage.source} · Session ${usage.sessionId.slice(0, 8)}` : 'No host telemetry connected for this agent.', 'usage-detail'));
+  const guide = element('a', 'Usage setup and meaning', 'text-action'); guide.href = '#how-to-use'; details.append(guide); panel.append(details);
+  return panel;
+}
 function renderAgents() {
   const filter = $('project-filter').value;
   const agents = snapshot.agents.filter(agent => !filter || agent.project === filter);
+  const expandedUsage = new Set([...$('agents').querySelectorAll('details[open]')].map(node => node.dataset.agentUsage));
   $('agents').replaceChildren();
   if (!agents.length) empty($('agents'), 'No agents yet. Register one below or use add-agent.');
   for (const agent of agents) {
@@ -104,6 +142,7 @@ function renderAgents() {
     title.append(element('span', agent.name.slice(0, 2).toUpperCase(), 'avatar'), element('span', agent.name));
     card.append(title, element('div', `${agent.project} · ${agent.provider} / ${agent.model}`, 'agent-meta'));
     card.append(element('div', `Requested effort: ${agent.reasoningEffort || 'default'} · Session settings are not verified`, 'agent-meta'));
+    card.append(renderUsage(agent.usage, agent.name, expandedUsage.has(agent.name)));
     const footer = element('div', undefined, 'd-flex align-items-center justify-content-between gap-2 mt-3');
     footer.append(element('span', !agent.enabled ? 'Disabled' : agent.connected ? 'Adapter connected' : 'Offline / inbox available', `agent-status${agent.connected ? ' online' : ''}`));
     footer.append(action(agent.enabled ? 'Disable' : 'Enable', async () => { await api(`/api/agents/${agent.name}`, 'PATCH', { enabled: !agent.enabled }); await refresh(); }));
@@ -119,9 +158,13 @@ function messageCard(message, inThread = false) {
   const footer = element('div', undefined, 'message-footer');
   footer.append(element('span', message.status, `status ${message.status}`), element('span', message.project, 'project-tag'), element('span', message.kind));
   if (message.handoff) footer.append(action(`Handoff: ${message.handoff.state}`, () => openHandoff(message.handoff.id)));
-  if (!inThread) footer.append(action('View conversation', () => openThread(message.conversation_id)));
+  if (!inThread) {
+    const button = action('View conversation', () => openThread(message.conversation_id));
+    button.dataset.conversation = message.conversation_id; footer.append(button);
+  }
   if (message.recipient === '@human') {
     footer.append(action('Reply', () => {
+      closeThread();
       replyTo = message.id; $('compose-title').textContent = `Reply to ${message.sender}`;
       $('message-project').value = message.project; fillRecipients(); $('recipient').value = message.sender;
       $('message-project').disabled = true; $('recipient').disabled = true; $('question').disabled = true; $('question').checked = false;
@@ -191,6 +234,7 @@ async function downloadEvidence(id) {
 }
 async function openHandoff(id) {
   const item = await api(`/api/handoffs/${id}`);
+  closeThread();
   const panel = $('handoff-detail'); panel.replaceChildren();
   panel.append(element('p', `${item.sender} → ${item.recipient} · ${item.state}`, 'fw-semibold'), element('h3', item.packet.objective, 'h6'), element('p', item.packet.context, 'message-body'));
   panel.append(element('p', `Workspace reference: ${item.packet.workspaceRef}`, 'small text-secondary evidence-hash'));
@@ -212,13 +256,39 @@ async function openHandoff(id) {
   $('handoff-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 async function openThread(id) {
-  threadId = id; threadCursor = 0; $('thread').replaceChildren(); $('thread-panel').hidden = false;
-  await moreThread(); $('thread-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  threadTrigger = document.activeElement;
+  threadId = id; threadCursor = 0; $('thread').replaceChildren(); $('thread-more').hidden = true;
+  const message = snapshot?.messages.find(item => item.conversation_id === id);
+  $('thread-description').textContent = message ? `${message.sender} ↔ ${message.recipient} · ${message.project}` : 'Messages in this conversation';
+  if (!$('thread-panel').open) $('thread-panel').showModal();
+  document.body.classList.add('conversation-open');
+  await moreThread();
+}
+function closeThread() {
+  if (!$('thread-panel').open) return;
+  const closedId = threadId;
+  threadId = undefined; threadRequest++;
+  $('thread-panel').close(); document.body.classList.remove('conversation-open');
+  const trigger = threadTrigger?.isConnected ? threadTrigger : [...$('messages').querySelectorAll('[data-conversation]')].find(button => button.dataset.conversation === closedId);
+  (trigger || $('refresh')).focus(); threadTrigger = undefined;
 }
 async function moreThread() {
-  const data = await api(`/api/conversations/${threadId}?after=${threadCursor}&limit=50`);
-  $('thread').append(...data.items.map(message => messageCard(message, true)));
-  threadCursor = data.nextCursor; $('thread-more').hidden = data.items.length < 50;
+  if (!threadId) return;
+  const id = threadId, requestId = ++threadRequest;
+  $('thread-more').disabled = true;
+  $('thread-status').textContent = 'Loading conversation…'; $('thread-status').hidden = false;
+  try {
+    const data = await api(`/api/conversations/${id}?after=${threadCursor}&limit=50`);
+    if (requestId !== threadRequest || threadId !== id) return;
+    $('thread').append(...data.items.map(message => messageCard(message, true)));
+    if (!data.items.length && !threadCursor) empty($('thread'), 'No messages in this conversation.');
+    threadCursor = data.nextCursor; $('thread-more').hidden = data.items.length < 50;
+    $('thread-more').textContent = 'Load more'; $('thread-status').hidden = true;
+  } catch (failure) {
+    if (requestId !== threadRequest || threadId !== id) return;
+    $('thread-status').textContent = `Unable to load conversation: ${failure.message}`;
+    $('thread-more').textContent = 'Retry'; $('thread-more').hidden = false;
+  } finally { if (requestId === threadRequest) $('thread-more').disabled = false; }
 }
 function cancelReply() {
   replyTo = undefined; $('compose-title').textContent = 'Send a message'; $('cancel-reply').hidden = true;
@@ -242,7 +312,20 @@ $('message-project').addEventListener('input', fillRecipients);
 $('pause').addEventListener('click', () => run(async () => { await api('/api/pause', 'POST', { paused: !snapshot.paused }); await refresh(); }));
 $('cancel-reply').addEventListener('click', cancelReply);
 $('close-handoff').addEventListener('click', () => { $('handoff-panel').hidden = true; });
-$('close-thread').addEventListener('click', () => { $('thread-panel').hidden = true; threadId = undefined; });
+$('close-thread').addEventListener('click', closeThread);
+$('thread-panel').addEventListener('cancel', event => { event.preventDefault(); closeThread(); });
+$('thread-panel').addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
+  const controls = [...$('thread-panel').querySelectorAll('button:not(:disabled), a[href], [tabindex="0"]')].filter(node => node.getClientRects().length);
+  const first = controls[0], last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+});
+$('thread-panel').addEventListener('click', event => {
+  if (event.target !== $('thread-panel')) return;
+  const bounds = $('thread-panel').getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeThread();
+});
 $('thread-more').addEventListener('click', () => run(moreThread));
 $('older').addEventListener('click', () => run(async () => {
   const project = $('project-filter').value;

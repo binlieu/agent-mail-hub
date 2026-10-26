@@ -5,7 +5,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from './store.js';
 import { modelOptions } from './model-options.js';
-import { evidenceSchema, evidenceReviewSchema, handoffSchema, handoffUpdateSchema, agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
+import { usageSchema, evidenceSchema, evidenceReviewSchema, handoffSchema, handoffUpdateSchema, agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
 import { SERVICE, VERSION, type HubConfig } from './config.js';
 import { join } from 'node:path';
 
@@ -14,6 +14,8 @@ const assets: Record<string, [string, string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
+  '/examples.html': ['examples.html', 'text/html; charset=utf-8'],
+  '/examples.js': ['examples.js', 'text/javascript; charset=utf-8'],
   '/vendor/bootstrap.min.css': ['vendor/bootstrap.min.css', 'text/css; charset=utf-8']
 };
 const digest = (value: string): Buffer => createHash('sha256').update(value).digest();
@@ -66,6 +68,7 @@ export async function startHub(directory: string, config: HubConfig, port = conf
       const actor: Actor | null = token && timingSafeEqual(digest(token), digest(config.adminToken)) ? { role: 'admin' } : store.authenticate(token);
       if (!actor) { authFailures++; throw new HubError(401, 'Valid bearer credentials required'); }
       if (path === '/api/model-options' && req.method === 'GET') return json(res, 200, modelOptions);
+      if (path === '/api/usage' && req.method === 'POST') return json(res, 200, store.reportUsage(actor, usageSchema.parse(await body(req))));
       const page = () => pageSchema.parse(Object.fromEntries(url.searchParams));
       if (path === '/api/me' && req.method === 'GET') return json(res, 200, { ...actor, instanceId: config.instanceId, paused: store.paused() });
       if (path === '/api/agents' && req.method === 'GET') return json(res, 200, { items: store.listAgents(actor) });

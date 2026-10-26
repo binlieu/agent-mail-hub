@@ -16,6 +16,9 @@ const help = `Agent Mail Hub ${VERSION} — isolated local agent messaging
   config --credentials FILE     Print a generic MCP configuration snippet
   mcp --credentials FILE        Run this agent's MCP adapter on stdio
   doctor [--credentials FILE]   Verify instance, authentication and connectivity
+  usage --credentials FILE --source claude|codex|claude-stream
+    --input FILE|- --session-id UUID [--watch] [--account-limits (Codex)]
+                                Report numeric host usage for this agent only
   admin-token                   Print the dashboard token (explicit secret access)
   send --credentials FILE --to NAME --body TEXT --key UNIQUE
   inbox --credentials FILE [--after 0]
@@ -34,12 +37,13 @@ async function main() {
     'data-dir': { type: 'string' }, port: { type: 'string' }, credentials: { type: 'string' },
     name: { type: 'string' }, project: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' },
     to: { type: 'string' }, body: { type: 'string' }, key: { type: 'string' }, message: { type: 'string' },
-    after: { type: 'string' }, serve: { type: 'boolean' }, help: { type: 'boolean', short: 'h' }
+    after: { type: 'string' }, serve: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    source: { type: 'string' }, input: { type: 'string' }, 'session-id': { type: 'string' }, watch: { type: 'boolean' }, 'account-limits': { type: 'boolean' }
   }});
   const command = positionals[0];
   if (!command || values.help || command === 'help') { console.log(help); return; }
   if (positionals.length > 1) throw new HubError(400, 'Unexpected positional arguments');
-  const known = ['setup','start','add-agent','config','mcp','doctor','admin-token','send','inbox','reply','status','demo'];
+  const known = ['setup','start','add-agent','config','mcp','doctor','admin-token','send','inbox','reply','status','demo','usage'];
   if (!known.includes(command)) throw new HubError(400, `Unknown command: ${command}. Run --help.`);
   const directory = dataDirectory(values['data-dir']);
   const credentialPath = values.credentials ?? process.env.AMH_CREDENTIALS_FILE;
@@ -67,6 +71,58 @@ async function main() {
   }
   if (command === 'mcp') {
     const { startMcp } = await import('./mcp.js'); await startMcp(credentials()); return;
+  }
+  if (command === 'usage') {
+    const { parseUsage, readUsageFile, readCodexAccountLimits } = await import('./usage.js');
+    const agent = credentials();
+    if (!values.input || !values.source || !values['session-id']) throw new HubError(400, 'Usage requires --source, --input and --session-id');
+    if (values.watch && values.input === '-') throw new HubError(400, '--watch requires a regular file');
+    if (values['account-limits'] && values.source !== 'codex') throw new HubError(400, '--account-limits requires --source codex');
+    let stdin: string | undefined;
+    if (values.input === '-') {
+      const chunks: Buffer[] = []; let length = 0;
+      for await (const chunk of process.stdin) {
+        length += chunk.length;
+        if (length > 262144) throw new HubError(413, 'Usage stdin exceeds 256 KiB');
+        chunks.push(Buffer.from(chunk));
+      }
+      stdin = Buffer.concat(chunks).toString('utf8');
+    }
+    let previous: string | undefined;
+    let running = false;
+    let accountLimits: Awaited<ReturnType<typeof readCodexAccountLimits>> | undefined;
+    let accountAttempt = 0;
+    const publish = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const input = stdin === undefined ? readUsageFile(resolve(values.input!)) : { text: stdin, observedAt: new Date().toISOString() };
+        const report = parseUsage(values.source!, input.text, values['session-id']!, input.observedAt);
+        if (values['account-limits']) {
+          if (Date.now() - accountAttempt >= 60000) {
+            accountAttempt = Date.now();
+            try { accountLimits = await readCodexAccountLimits(); }
+            catch { console.error('Codex account limits unavailable; existing allowance observations retain their original age.'); }
+          }
+          if (accountLimits?.length) {
+            report.limits = accountLimits;
+            report.observedAt = [report.observedAt, ...accountLimits.map(item => item.observedAt)].sort().at(-1)!;
+          }
+        }
+        const fingerprint = JSON.stringify(report);
+        if (fingerprint === previous) return;
+        await verifyHub(agent.url, agent.instanceId);
+        await request(agent.url, agent.token, '/api/usage', 'POST', report);
+        previous = fingerprint;
+        console.log(`${agent.name}: context ${report.context?.usedPercent === null || !report.context ? 'unavailable' : report.context.usedPercent.toFixed(1) + '% used'}; ${report.limits.length} shared allowance window(s).`);
+      } finally { running = false; }
+    };
+    await publish();
+    if (values.watch) {
+      const interval = setInterval(() => { void publish().catch(() => console.error('Usage update failed; previous observation retained. Check the input session and hub.')); }, 20000);
+      handleShutdown(async () => { clearInterval(interval); });
+    }
+    return;
   }
   if (command === 'demo') {
     const { runDemo } = await import('./demo.js');

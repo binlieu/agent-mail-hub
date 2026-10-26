@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="container-fluid px-4 d-flex align-items-center justify-content-between gap-3">
       <a class="brand" href="/" aria-label="Agent Mail Hub home"><span class="brand-mark">↔</span> Agent Mail Hub <span class="version">LOCAL · v0.1</span></a>
-      <div class="header-actions d-flex gap-3 align-items-center"><a class="btn btn-sm btn-outline-secondary" href="#how-to-use">How to use</a><span id="connection" class="connection">Sign in to connect</span><button id="logout" class="btn btn-sm btn-outline-secondary" hidden>Sign out</button></div>
+      <div class="header-actions d-flex gap-3 align-items-center"><a class="btn btn-sm btn-outline-secondary" href="/examples.html">Examples &amp; prompts</a><a class="btn btn-sm btn-outline-secondary" href="#how-to-use">How to use</a><span id="connection" class="connection">Sign in to connect</span><button id="logout" class="btn btn-sm btn-outline-secondary" hidden>Sign out</button></div>
     </div>
   </header>
   <section id="how-to-use" class="usage-guide container py-4" aria-labelledby="guide-title">
@@ -22,6 +22,7 @@
         <a href="#" class="btn btn-outline-secondary">Back to dashboard</a>
       </div>
       <p>This guide is available without signing in. Share this page's address with someone using the same local hub. The hub listens on this computer only; <code>127.0.0.1</code> on another computer refers to that other computer.</p>
+      <p>For complete role-based exercises, open <a href="/examples.html">Examples &amp; prompts</a>: Codex PM / Claude worker, Claude PM / Codex worker, Claude reviewer / Codex coder, and handoffs in either direction.</p>
       <div class="alert alert-light border"><strong>Three parts:</strong> the hub stores messages; the dashboard lets you inspect them; each AI connects through its own MCP adapter. Different AI providers can use the same hub.</div>
 
       <h2 class="h5 mt-4">1. Start the hub</h2>
@@ -66,7 +67,7 @@ then reply_message with body "Confirmed: received through the hub"
 and idempotencyKey "hello-reply-001". Do not change files.</code></pre></div>
       <div class="guide-example"><strong>Planner again</strong><pre><code>Read your inbox, acknowledge builder's reply, then get the
 original question's status and conversation. Report the real IDs.</code></pre></div>
-      <p>Watch <strong>Message stream</strong> and <strong>Delivery activity</strong>. Click <strong>View conversation</strong> to follow the thread. When retrying a send after a timeout, reuse the same idempotency key and content.</p>
+      <p>Watch <strong>Message stream</strong> and <strong>Delivery activity</strong>. Click <strong>View conversation</strong> to open the thread in a scrollable popup. Use <strong>Close</strong>, Esc, or click outside to return to the dashboard. When retrying a send after a timeout, reuse the same idempotency key and content.</p>
       <p><strong>Delivery is pull-based:</strong> ask the receiving AI to check its inbox, or use a supported host integration. Sending a message alone does not wake an idle model. “Connected” means a recent adapter heartbeat, not that the AI is currently working.</p>
 
       <h2 class="h5 mt-4">6. Hand off work and transfer evidence</h2>
@@ -107,6 +108,17 @@ node dist/cli.js demo --serve --port 47932</code></pre>
         <li><strong>Port occupied:</strong> choose a new data directory and unused port. Do not stop the other service.</li>
         <li><strong>Need a backup:</strong> stop only this hub and copy its entire private data directory, including SQLite sidecars.</li>
       </ul>
+      <h2 class="h5 mt-4">9. Read context and account allowance</h2>
+      <p>Each agent card separates <strong>context used/free</strong> (one model session) from <strong>shared account allowance</strong> (provider rate-limit windows). Agents on the same account share that allowance; picking another agent does not create a new allowance. Reported token usage is consumption, not a guaranteed token balance.</p>
+      <p>Connect an opt-in reporter using that agent's credential and the exact AI session ID. For Codex, read only the intended session JSONL:</p>
+      <pre><code>node dist/cli.js usage --credentials /absolute/path/builder.json \
+  --source codex --input /absolute/path/intended-session.jsonl \
+  --session-id YOUR-CODEX-SESSION-UUID --watch --account-limits</code></pre>
+      <p>For Claude, pass native status-line JSON on stdin to this command from the intended session's status-line wrapper:</p>
+      <pre><code>node /absolute/path/agent-mail-hub/dist/cli.js usage \
+  --credentials /absolute/path/planner.json --source claude \
+  --input - --session-id YOUR-CLAUDE-SESSION-UUID</code></pre>
+      <p>Preserve any existing status-line output. Full setup and wrapper samples are in <code>docs/usage-metrics.md</code> in the package. MCP connectivity alone cannot supply usage. Missing values show <strong>Unavailable</strong>, observations older than five minutes show <strong>Stale</strong>, and passed reset times require a new reading. An offline agent's old context does not prove it is ready for work. No global AI or existing A2A settings are edited by the reporter.</p>
       <p>Existing A2A tools use their own settings and mailbox. This package does not edit them automatically. Keep credential files, administrator tokens, databases, transcripts, and runtime proof files out of Git.</p>
       <a href="#" class="btn btn-primary mt-3">Back to dashboard →</a>
     </div>
@@ -160,7 +172,11 @@ node dist/cli.js demo --serve --port 47932</code></pre>
         <section class="col-12 col-lg-6">
           <div class="panel mb-4"><div class="panel-heading"><h2>Message stream</h2><span class="small text-secondary">Newest first</span></div><div id="messages" class="message-list"></div><div class="p-3 border-top"><button id="older" class="btn btn-sm btn-outline-secondary">Load older messages</button></div></div>
           <section id="handoff-panel" class="panel mb-4" hidden><div class="panel-heading"><h2>Handoff and evidence</h2><button id="close-handoff" class="btn btn-sm btn-outline-secondary">Close handoff</button></div><div id="handoff-detail" class="p-3"></div></section>
-          <section id="thread-panel" class="panel mb-4" hidden><div class="panel-heading"><h2>Conversation</h2><button id="close-thread" class="btn btn-sm btn-outline-secondary">Close</button></div><div id="thread" class="message-list"></div><button id="thread-more" class="btn btn-sm btn-outline-secondary m-3">Load more</button></section>
+          <dialog id="thread-panel" class="conversation-modal" aria-labelledby="thread-title" aria-describedby="thread-description">
+            <div class="modal-header conversation-heading"><div><h2 id="thread-title">Conversation</h2><p id="thread-description" class="small text-secondary mb-0 mt-1">Messages in this conversation</p></div><button id="close-thread" class="btn btn-sm btn-outline-secondary" type="button" autofocus>Close</button></div>
+            <div class="conversation-body"><p id="thread-status" class="m-3 small" role="status" hidden></p><div id="thread" class="message-list"></div></div>
+            <div class="modal-footer"><button id="thread-more" class="btn btn-sm btn-outline-secondary" type="button" hidden>Load more</button><span class="small text-secondary">Press Esc or click outside to close.</span></div>
+          </dialog>
           <section class="panel"><div class="panel-heading"><h2 id="compose-title">Send a message</h2><span class="small text-secondary">As human administrator</span></div><form id="message-form" class="p-3">
             <div class="row g-3 mb-3"><div class="col-sm-6"><label for="message-project" class="form-label">Project</label><input id="message-project" class="form-control" value="default" required pattern="[a-z0-9][a-z0-9_\-]{0,63}"></div><div class="col-sm-6"><label for="recipient" class="form-label">Recipient</label><select id="recipient" class="form-select" required></select></div></div>
             <label for="body" class="form-label">Message</label><textarea id="body" class="form-control" rows="3" required maxlength="16000" placeholder="Give an agent context or ask a question…"></textarea>

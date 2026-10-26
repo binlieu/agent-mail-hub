@@ -8,7 +8,7 @@ The package uses the official MCP TypeScript SDK 2.4.0. `serveStdio` supports mo
 
 ## Storage
 
-- `meta`: schema version and durable pause state.
+- `meta`: schema version, durable pause state, optional requested effort and latest numeric usage snapshot per agent. Usage snapshots preserve observation times and source session identity; no transcript, source path or provider credential is stored.
 - `agents`: stable globally unique name, project, provider/model metadata, token hash, enabled flag.
 - `sessions`: adapter instance UUID, owning agent, host, connection flag, heartbeat.
 - `messages`: monotonic sequence, UUID, conversation UUID, project, participants, body, type, idempotency key, reply link, lifecycle timestamps.

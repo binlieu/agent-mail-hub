@@ -1,9 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { HubError, requireAdmin, type Actor, type NewAgent, type NewMessage, type Page, type NewEvidence, type EvidenceReview, type NewHandoff, type HandoffUpdate } from './contracts.js';
+import { HubError, requireAdmin, usageSchema, type UsageReport, type Actor, type NewAgent, type NewMessage, type Page, type NewEvidence, type EvidenceReview, type NewHandoff, type HandoffUpdate } from './contracts.js';
 import { secret } from './config.js';
 import { validateModelPreference } from './model-options.js';
+import { presentUsage } from './usage.js';
 
 type Row = Record<string, any>;
 const hash = (token: string): string => createHash('sha256').update(token).digest('hex');
@@ -133,8 +134,26 @@ export class Store {
       const last = this.db.prepare('SELECT host,last_seen,connected FROM sessions WHERE agent=? ORDER BY last_seen DESC LIMIT 1').get(row.name!);
       const active = this.db.prepare('SELECT count(*) AS count FROM sessions WHERE agent=? AND connected=1 AND last_seen>?').get(row.name!, new Date(Date.now() - 60000).toISOString());
       const unread = this.db.prepare('SELECT count(*) AS count FROM messages WHERE recipient=? AND acknowledged_at IS NULL').get(row.name!);
-      return { ...row, reasoningEffort: this.db.prepare('SELECT value FROM meta WHERE key=?').get(`agent_effort:${row.name}`)?.value ?? 'default', configurationStatus: 'requested', enabled: Boolean(row.enabled), capabilities: JSON.parse(String(row.capabilities)), lastSeen: last?.last_seen ?? null,
+      const savedUsage = this.db.prepare('SELECT value FROM meta WHERE key=?').get(`agent_usage:${row.name}`);
+      const usage = savedUsage ? JSON.parse(String(savedUsage.value)) : null;
+      return { ...row, usage: usage ? presentUsage(usage.report, usage.reportedAt) : null, reasoningEffort: this.db.prepare('SELECT value FROM meta WHERE key=?').get(`agent_effort:${row.name}`)?.value ?? 'default', configurationStatus: 'requested', enabled: Boolean(row.enabled), capabilities: JSON.parse(String(row.capabilities)), lastSeen: last?.last_seen ?? null,
         host: last?.host ?? null, connected: Boolean(Number(active?.count)) && Boolean(row.enabled), unread: Number(unread?.count), deliveryMode: 'poll' };
+    });
+  }
+  reportUsage(actor: Actor, input: UsageReport): { ok: boolean } {
+    if (actor.role !== 'agent') throw new HubError(403, 'Use the intended agent credential to report usage');
+    const report = usageSchema.parse(input);
+    const agent = this.db.prepare('SELECT provider FROM agents WHERE name=?').get(actor.name);
+    if (agent && ['claude', 'codex'].includes(String(agent.provider)) && agent.provider !== report.provider) throw new HubError(409, 'Usage provider does not match the registered AI client');
+    const timestamps = [report.observedAt, report.context?.observedAt, report.sessionTokensObservedAt, ...report.limits.map(item => item.observedAt)].filter(Boolean) as string[];
+    if (timestamps.some(value => Date.parse(value) > Date.now() + 60000)) throw new HubError(400, 'Usage observations cannot be in the future');
+    return this.transaction(() => {
+      const existing = this.db.prepare('SELECT value FROM meta WHERE key=?').get(`agent_usage:${actor.name}`);
+      const previous = existing ? JSON.parse(String(existing.value)) : null;
+      if (previous && Date.parse(previous.report.observedAt) > Date.parse(report.observedAt)) throw new HubError(409, 'Older usage cannot replace a newer observation');
+      this.db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+        .run(`agent_usage:${actor.name}`, JSON.stringify({ report, reportedAt: now() }));
+      return { ok: true };
     });
   }
   heartbeat(actor: Actor, sessionId: string, host: string, connected: boolean): void {
