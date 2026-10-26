@@ -83,6 +83,44 @@ export class Store {
     if (version?.value !== '1') throw new HubError(500, 'Unsupported database schema version');
   }
   close(): void { this.db.close(); }
+  workerAgent(name: string): Row {
+    const row = this.db.prepare('SELECT name,project,provider,model,enabled FROM agents WHERE name=?').get(name);
+    if (!row || !row.enabled) throw new HubError(404, 'Enabled agent not found');
+    return { ...row, reasoningEffort:this.db.prepare('SELECT value FROM meta WHERE key=?').get(`agent_effort:${name}`)?.value ?? 'default' };
+  }
+  workerJob(id: string): Row | null {
+    const row = this.db.prepare('SELECT value FROM meta WHERE key=?').get(`worker_job:${id}`);
+    return row ? JSON.parse(String(row.value)) : null;
+  }
+  workerDependency(name: string): {pending:number;results:Row[]} {
+    this.workerAgent(name);
+    const pending=Number(this.db.prepare("SELECT count(*) AS count FROM messages WHERE recipient=? AND acknowledged_at IS NULL AND (sender='@human' OR kind='question')").get(name)?.count);
+    const results=this.db.prepare("SELECT reply.id,reply.body,reply.reply_to FROM messages reply JOIN messages original ON reply.reply_to=original.id WHERE reply.sender=? AND original.recipient=? AND reply.idempotency_key LIKE 'worker-reply:%' ORDER BY reply.seq DESC LIMIT 5").all(name,name)
+      .filter(row=>this.workerJob(String(row.reply_to))?.state==='done');
+    return{pending,results};
+  }
+  claimWorkerJob(actor: Actor, id: string, workerId: string): boolean {
+    return this.transaction(() => {
+      const message = this.accessibleMessage(actor,id), previous = this.workerJob(id);
+      if(actor.role!=='agent'||message.recipient!==actor.name)throw new HubError(403,'Recipient worker required');
+      if((message.acknowledged_at && previous?.state!=='retry') || (previous && previous.state!=='retry'))return false;
+      this.setWorkerJob(id,{state:'running',agent:actor.name,workerId,updatedAt:now()});
+      this.event(actor.project,actor.name,'worker_started',id); return true;
+    });
+  }
+  setWorkerJob(id: string, job: Row): void {
+    this.db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(`worker_job:${id}`,JSON.stringify({...job,updatedAt:now()}));
+  }
+  interruptWorkerJobs(): void {
+    for(const row of this.db.prepare("SELECT key,value FROM meta WHERE key LIKE 'worker_job:%'").all()) {
+      const job=JSON.parse(String(row.value)); if(job.state==='running')this.setWorkerJob(String(row.key).slice('worker_job:'.length),{...job,state:'interrupted',error:'Hub restarted. Explicit retry required.'});
+    }
+  }
+  retryWorkerJob(id: string): void {
+    const job=this.workerJob(id);
+    if(!job || !['failed','blocked','interrupted'].includes(job.state))throw new HubError(409,'Only failed, blocked or interrupted tasks can be retried');
+    this.setWorkerJob(id,{...job,state:'retry',error:null});
+  }
   private transaction<T>(work: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = work(); this.db.exec('COMMIT'); return result; }
@@ -175,7 +213,7 @@ export class Store {
     const replies = Number(this.db.prepare('SELECT count(*) AS count FROM messages WHERE reply_to=?').get(row.id)?.count);
     const evidence = this.db.prepare('SELECT e.id,e.filename,e.media_type,e.source_ref,e.sha256,e.size,e.owner FROM evidence e JOIN message_evidence me ON me.evidence_id=e.id WHERE me.message_id=? ORDER BY e.id').all(row.id);
     const handoff = this.db.prepare('SELECT id,state FROM handoffs WHERE message_id=?').get(row.id) ?? null;
-    return { ...row, evidence, handoff, status: replies ? 'answered' : row.acknowledged_at ? 'acknowledged' : row.delivered_at ? 'delivered' : 'queued' };
+    return { ...row, evidence, handoff, worker:this.workerJob(String(row.id)), status: replies ? 'answered' : row.acknowledged_at ? 'acknowledged' : row.delivered_at ? 'delivered' : 'queued' };
   }
   send(actor: Actor, input: NewMessage, humanProject?: string): Row {
     const project = actor.role === 'admin' ? humanProject : actor.project;

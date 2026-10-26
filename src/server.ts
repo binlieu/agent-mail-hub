@@ -5,6 +5,8 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from './store.js';
 import { modelOptions } from './model-options.js';
+import { Workers, workerStartSchema } from './workers.js';
+import type { HostRunner } from './worker-host.js';
 import { usageSchema, evidenceSchema, evidenceReviewSchema, handoffSchema, handoffUpdateSchema, agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
 import { SERVICE, VERSION, type HubConfig } from './config.js';
 import { join, resolve } from 'node:path';
@@ -14,6 +16,8 @@ const assets: Record<string, [string, string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
+  '/vendor/marked.js': ['vendor/marked.js', 'text/javascript; charset=utf-8'],
+  '/vendor/purify.js': ['vendor/purify.js', 'text/javascript; charset=utf-8'],
   '/examples.html': ['examples.html', 'text/html; charset=utf-8'],
   '/examples.js': ['examples.js', 'text/javascript; charset=utf-8'],
   '/vendor/bootstrap.min.css': ['vendor/bootstrap.min.css', 'text/css; charset=utf-8']
@@ -36,8 +40,9 @@ function json(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-export async function startHub(directory: string, config: HubConfig, port = config.port, options: { localAdminAccess?: boolean } = {}) {
+export async function startHub(directory: string, config: HubConfig, port = config.port, options: { localAdminAccess?: boolean; workerHost?:HostRunner } = {}) {
   const store = new Store(join(directory, 'hub.sqlite'));
+  const workers=new Workers(store,directory,options.workerHost);
   const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
   const adminTokenCommand = `${quote(process.execPath)} ${quote(fileURLToPath(new URL('./cli.js', import.meta.url)))} admin-token --data-dir ${quote(resolve(directory))}`;
   let listeningPort = port;
@@ -77,6 +82,12 @@ export async function startHub(directory: string, config: HubConfig, port = conf
       const actor: Actor | null = token && timingSafeEqual(digest(token), digest(config.adminToken)) ? { role: 'admin' } : store.authenticate(token);
       if (!actor) { authFailures++; throw new HubError(401, 'Valid bearer credentials required'); }
       if (path === '/api/model-options' && req.method === 'GET') return json(res, 200, modelOptions);
+      if(path==='/api/workers'&&req.method==='GET'){requireAdmin(actor);return json(res,200,{items:workers.list()});}
+      if(path==='/api/workers'&&req.method==='POST'){requireAdmin(actor);return json(res,201,workers.start(workerStartSchema.parse(await body(req))));}
+      const workerStop=path.match(/^\/api\/workers\/([^/]+)\/stop$/);
+      if(workerStop&&req.method==='POST'){requireAdmin(actor);return json(res,200,await workers.stop(slug.parse(workerStop[1])));}
+      const workerRetry=path.match(/^\/api\/worker-jobs\/([^/]+)\/retry$/);
+      if(workerRetry&&req.method==='POST'){requireAdmin(actor);return json(res,200,workers.retry(identifier.parse(workerRetry[1])));}
       if (path === '/api/usage' && req.method === 'POST') return json(res, 200, store.reportUsage(actor, usageSchema.parse(await body(req))));
       const page = () => pageSchema.parse(Object.fromEntries(url.searchParams));
       if (path === '/api/me' && req.method === 'GET') return json(res, 200, { ...actor, instanceId: config.instanceId, paused: store.paused() });
@@ -135,7 +146,7 @@ export async function startHub(directory: string, config: HubConfig, port = conf
       if (path === '/api/dashboard' && req.method === 'GET') {
         requireAdmin(actor);
         const project = url.searchParams.has('project') ? slug.parse(url.searchParams.get('project')) : undefined;
-        return json(res, 200, store.dashboard(actor, page(), project, z.coerce.number().int().min(1).parse(url.searchParams.get('before') ?? Number.MAX_SAFE_INTEGER)));
+        return json(res, 200, {...store.dashboard(actor, page(), project, z.coerce.number().int().min(1).parse(url.searchParams.get('before') ?? Number.MAX_SAFE_INTEGER)),workers:workers.list()});
       }
       throw new HubError(404, 'Route not found');
     } catch (error) {
@@ -157,9 +168,11 @@ export async function startHub(directory: string, config: HubConfig, port = conf
   } catch (error) { store.close(); throw error; }
   const address = server.address();
   if (address && typeof address !== 'string') listeningPort = address.port;
+  store.interruptWorkerJobs();
   return {
     url: `http://127.0.0.1:${listeningPort}`, store, server,
     close: async () => {
+      await workers.close();
       await new Promise<void>((resolve, reject) => {
         server.close(error => error ? reject(error) : resolve());
         server.closeIdleConnections();

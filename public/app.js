@@ -16,6 +16,40 @@ let instanceId;
 let registrationOptions;
 let localTokenRequest = 0;
 
+function escapeHtml(value) { const node = document.createElement('span'); node.textContent = value; return node.innerHTML; }
+marked.use({ renderer: {
+  html: ({text}) => escapeHtml(text),
+  image: ({text}) => escapeHtml(`[Image: ${text}]`)
+} });
+function markdownBody(text, sourceToggle = false) {
+  const container = element('div', undefined, 'message-body markdown-body');
+  const preview = element('div');
+  preview.append(DOMPurify.sanitize(marked.parse(text, {gfm:true,breaks:true}), {
+    RETURN_DOM_FRAGMENT:true,
+    ALLOWED_TAGS:['p','br','hr','h1','h2','h3','h4','h5','h6','strong','em','del','blockquote','ul','ol','li','pre','code','a','table','thead','tbody','tr','th','td'],
+    ALLOWED_ATTR:['href','title','start','align']
+  }));
+  for (const link of preview.querySelectorAll('a')) {
+    const href = link.getAttribute('href');
+    try {
+      if (!href || !['http:','https:','mailto:'].includes(new URL(href, location.origin).protocol)) link.removeAttribute('href');
+      else { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+    } catch { link.removeAttribute('href'); }
+  }
+  container.append(preview);
+  if (sourceToggle) {
+    const source = element('pre', text, 'markdown-source'); source.hidden = true;
+    const toggle = action('Show Markdown source', () => {
+      source.hidden = !source.hidden; preview.hidden = !source.hidden;
+      toggle.textContent = source.hidden ? 'Show Markdown source' : 'Show rendered preview';
+      toggle.setAttribute('aria-pressed', String(!source.hidden));
+    });
+    toggle.setAttribute('aria-pressed', 'false');
+    container.prepend(toggle); container.append(source);
+  }
+  return container;
+}
+
 function shellQuote(value) { return "'" + value.replaceAll("'", "'\"'\"'") + "'"; }
 function updateModelChoice(resetModel = false) {
   if (!registrationOptions) return;
@@ -145,6 +179,8 @@ function renderAgents() {
     card.append(title, element('div', `${agent.project} · ${agent.provider} / ${agent.model}`, 'agent-meta'));
     card.append(element('div', `Requested effort: ${agent.reasoningEffort || 'default'} · Session settings are not verified`, 'agent-meta'));
     card.append(renderUsage(agent.usage, agent.name, expandedUsage.has(agent.name)));
+    const worker=snapshot.workers?.find(item=>item.agent===agent.name);
+    if(worker)card.append(element('div',`Automatic worker: ${worker.state} · ${worker.provider}`, 'agent-meta'));
     const footer = element('div', undefined, 'd-flex align-items-center justify-content-between gap-2 mt-3');
     footer.append(element('span', !agent.enabled ? 'Disabled' : agent.connected ? 'Adapter connected' : 'Offline / inbox available', `agent-status${agent.connected ? ' online' : ''}`));
     footer.append(action(agent.enabled ? 'Disable' : 'Enable', async () => { await api(`/api/agents/${agent.name}`, 'PATCH', { enabled: !agent.enabled }); await refresh(); }));
@@ -159,6 +195,11 @@ function messageCard(message, inThread = false) {
   const timestamp = element('time', time(message.created_at)); timestamp.dateTime = message.created_at; route.append(timestamp);
   const footer = element('div', undefined, 'message-footer');
   footer.append(element('span', message.status, `status ${message.status}`), element('span', message.project, 'project-tag'), element('span', message.kind));
+  if(message.worker){
+    footer.append(element('span',`Worker: ${message.worker.state}`));
+    if(message.worker.error)footer.append(element('span',message.worker.error));
+    if(['failed','blocked','interrupted'].includes(message.worker.state))footer.append(action('Retry worker task',async()=>{await api(`/api/worker-jobs/${message.id}/retry`,'POST');await refresh();}));
+  }
   if (message.handoff) footer.append(action(`Handoff: ${message.handoff.state}`, () => openHandoff(message.handoff.id)));
   if (!inThread) {
     const button = action('View conversation', () => openThread(message.conversation_id));
@@ -174,7 +215,7 @@ function messageCard(message, inThread = false) {
     }));
     if (!message.acknowledged_at) footer.append(action('Acknowledge', async () => { await api(`/api/messages/${message.id}/ack`, 'POST'); await refresh(); }));
   }
-  card.append(route, element('p', message.body, 'message-body'), footer);
+  card.append(route, markdownBody(message.body, inThread), footer);
   if (message.evidence?.length) {
     const attachments = element('div', undefined, 'evidence-list mt-3');
     for (const item of message.evidence) attachments.append(evidenceLink(item));
@@ -201,7 +242,7 @@ async function refresh() {
     $('project-filter').replaceChildren(new Option('All projects', ''), ...projects.map(name => new Option(name, name)));
     $('project-filter').value = project;
     if (firstLoad && !data.agents.some(agent => agent.project === $('message-project').value) && data.agents[0]) $('message-project').value = data.agents[0].project;
-    renderAgents(); fillRecipients();
+    renderAgents(); fillRecipients(); renderWorkers();
     if (replyTo) {
       const existing = await api(`/api/messages/${replyTo}`); $('recipient').value = existing.sender;
     }
@@ -238,17 +279,17 @@ async function openHandoff(id) {
   const item = await api(`/api/handoffs/${id}`);
   closeThread();
   const panel = $('handoff-detail'); panel.replaceChildren();
-  panel.append(element('p', `${item.sender} → ${item.recipient} · ${item.state}`, 'fw-semibold'), element('h3', item.packet.objective, 'h6'), element('p', item.packet.context, 'message-body'));
+  panel.append(element('p', `${item.sender} → ${item.recipient} · ${item.state}`, 'fw-semibold'), element('h3', item.packet.objective, 'h6'), markdownBody(item.packet.context, true));
   panel.append(element('p', `Workspace reference: ${item.packet.workspaceRef}`, 'small text-secondary evidence-hash'));
   for (const [label, field] of [['Completed before transfer', 'completed'], ['Remaining at transfer', 'remaining'], ['Next steps', 'nextSteps']]) {
     panel.append(element('h3', label, 'h6 mt-3'));
     const list = element('ul', undefined, 'small');
-    for (const entry of item.packet[field]) list.append(element('li', entry));
+    for (const entry of item.packet[field]) { const row = element('li'); row.append(markdownBody(entry)); list.append(row); }
     panel.append(list);
   }
   panel.append(element('h3', 'Transferred evidence', 'h6 mt-3'));
   for (const entry of item.evidence) panel.append(evidenceLink(entry));
-  for (const update of item.updates) panel.append(element('p', `${update.state}: ${update.note}`, 'small mt-3'));
+  for (const update of item.updates) { panel.append(element('h4', update.state, 'h6 mt-3'), markdownBody(update.note)); }
   if (item.completionEvidence.length) {
     panel.append(element('h3', 'Result evidence', 'h6 mt-3'));
     for (const entry of item.completionEvidence) panel.append(evidenceLink(entry));
@@ -257,6 +298,51 @@ async function openHandoff(id) {
   $('handoff-panel').hidden = false;
   $('handoff-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+function workerProviderForAgent(){
+  const agent=snapshot?.agents.find(item=>item.name===$('worker-agent').value);
+  if(agent&&/claude|anthropic/i.test(agent.provider))$('worker-provider').value='claude';
+  else if(agent&&/codex|openai/i.test(agent.provider))$('worker-provider').value='codex';
+  fillWorkerDependencies();
+}
+function fillWorkerDependencies(){
+  const selected=$('worker-dependency').value;
+  const agent=snapshot?.agents.find(item=>item.name===$('worker-agent').value);
+  const peers=snapshot?.agents.filter(item=>item.enabled&&item.project===agent?.project&&item.name!==agent?.name)||[];
+  const current=[...$('worker-dependency').options].slice(1).map(option=>option.value);
+  if(current.length!==peers.length||current.some((name,index)=>name!==peers[index].name)){
+    $('worker-dependency').replaceChildren(new Option('Start independently',''),...peers.map(item=>new Option(item.name,item.name)));
+    if(peers.some(item=>item.name===selected))$('worker-dependency').value=selected;
+  }
+}
+function renderWorkers(){
+  const selected=$('worker-agent').value;
+  const agents=snapshot.agents.filter(item=>item.enabled);
+  const options=[...$('worker-agent').options];
+  if(options.length!==agents.length||options.some((item,index)=>item.value!==agents[index]?.name)){
+    $('worker-agent').replaceChildren(...agents.map(item=>new Option(`${item.name} · ${item.project}`,item.name)));
+    if(agents.some(item=>item.name===selected))$('worker-agent').value=selected;
+    else workerProviderForAgent();
+  }
+  $('worker-form').querySelector('button[type="submit"]').disabled=!agents.length;
+  fillWorkerDependencies();
+  $('automatic-workers').replaceChildren();
+  for(const worker of snapshot.workers||[]){
+    const row=element('div',undefined,'worker-row mb-3 p-3 border rounded');
+    row.append(element('strong',`${worker.agent} · ${worker.provider} · ${worker.state}`),element('div',`${worker.processed}/${worker.maxJobs} tasks · ${worker.workspace||'Messages/evidence only'}`,'small text-secondary mt-1'));
+    if(worker.error)row.append(element('p',worker.error,'small mt-2 mb-0'));
+    if(worker.waitForAgent)row.append(element('div',`Waits for: ${worker.waitForAgent}`,'small text-secondary'));
+    if(worker.state!=='stopped')row.append(action('Stop worker',async()=>{await api(`/api/workers/${worker.agent}/stop`,'POST');await refresh();}));
+    $('automatic-workers').append(row);
+  }
+}
+$('worker-agent').addEventListener('change',workerProviderForAgent);
+$('worker-form').addEventListener('submit',event=>{
+  event.preventDefault();const button=event.submitter;
+  run(async()=>{button.disabled=true;try{
+    await api('/api/workers','POST',{agent:$('worker-agent').value,provider:$('worker-provider').value,...($('worker-workspace').value.trim()?{workspace:$('worker-workspace').value.trim()}:{}),...($('worker-dependency').value?{waitForAgent:$('worker-dependency').value}:{}),maxJobs:Number($('worker-max-jobs').value)});
+    await refresh();
+  }finally{button.disabled=false;}});
+});
 async function openThread(id) {
   threadTrigger = document.activeElement;
   threadId = id; threadCursor = 0; $('thread').replaceChildren(); $('thread-more').hidden = true;

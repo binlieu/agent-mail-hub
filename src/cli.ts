@@ -24,6 +24,7 @@ const help = `Agent Mail Hub ${VERSION} — isolated local agent messaging
   inbox --credentials FILE [--after 0]
   reply --credentials FILE --message UUID --body TEXT --key UNIQUE
   status --credentials FILE --message UUID
+  workspace-mcp --workspace DIR Run the worker's scoped read-only file tools
   demo [--serve]                Run two simulated agents through real MCP clients
 
 Options: --data-dir ABS_PATH (or AMH_DATA_DIR), --port NUMBER (setup/demo)
@@ -34,7 +35,7 @@ No existing A2A data, terminal sessions, or AI configuration is modified.
 
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, strict: true, options: {
-    'data-dir': { type: 'string' }, port: { type: 'string' }, credentials: { type: 'string' },
+    'data-dir': { type: 'string' }, port: { type: 'string' }, credentials: { type: 'string' }, workspace: { type: 'string' },
     name: { type: 'string' }, project: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' },
     to: { type: 'string' }, body: { type: 'string' }, key: { type: 'string' }, message: { type: 'string' },
     after: { type: 'string' }, serve: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
@@ -43,9 +44,13 @@ async function main() {
   const command = positionals[0];
   if (!command || values.help || command === 'help') { console.log(help); return; }
   if (positionals.length > 1) throw new HubError(400, 'Unexpected positional arguments');
-  const known = ['setup','start','add-agent','config','mcp','doctor','admin-token','send','inbox','reply','status','demo','usage'];
+  const known = ['setup','start','add-agent','config','mcp','doctor','admin-token','send','inbox','reply','status','demo','usage','workspace-mcp'];
   if (!known.includes(command)) throw new HubError(400, `Unknown command: ${command}. Run --help.`);
   const directory = dataDirectory(values['data-dir']);
+  if(command==='workspace-mcp') {
+    if(!values.workspace)throw new HubError(400,'--workspace is required');
+    const {startWorkspaceMcp}=await import('./workspace.js');startWorkspaceMcp(values.workspace);return;
+  }
   const credentialPath = values.credentials ?? process.env.AMH_CREDENTIALS_FILE;
   const credentials = () => {
     if (!credentialPath) throw new HubError(400, 'Specify --credentials /absolute/path.json or AMH_CREDENTIALS_FILE');

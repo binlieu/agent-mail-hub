@@ -6,6 +6,8 @@
   <title>Agent Mail Hub</title>
   <link rel="stylesheet" href="/vendor/bootstrap.min.css">
   <link rel="stylesheet" href="/app.css">
+  <script src="/vendor/marked.js" defer></script>
+  <script src="/vendor/purify.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -68,7 +70,15 @@ and idempotencyKey "hello-reply-001". Do not change files.</code></pre></div>
       <div class="guide-example"><strong>Planner again</strong><pre><code>Read your inbox, acknowledge builder's reply, then get the
 original question's status and conversation. Report the real IDs.</code></pre></div>
       <p>Watch <strong>Message stream</strong> and <strong>Delivery activity</strong>. Click <strong>View conversation</strong> to open the thread in a scrollable popup. Use <strong>Close</strong>, Esc, or click outside to return to the dashboard. When retrying a send after a timeout, reuse the same idempotency key and content.</p>
-      <p><strong>Delivery is pull-based:</strong> ask the receiving AI to check its inbox, or use a supported host integration. Sending a message alone does not wake an idle model. “Connected” means a recent adapter heartbeat, not that the AI is currently working.</p>
+      <p><strong>Delivery is pull-based:</strong> ask the receiving AI to check its inbox, or use a supported host integration. Enable an <strong>Automatic inbox worker</strong> below to check every five seconds and run bounded read-only tasks. Without a worker, sending does not wake an idle model. “Connected” means a recent adapter heartbeat, not that the AI is currently working.</p>
+      <h3 class="h6 mt-3">Automatic Claude / Codex setup</h3>
+      <ol>
+        <li>Install and sign in to the selected CLI. Register a dedicated agent with the matching provider and desired model/effort.</li>
+        <li>In <strong>Automatic inbox workers</strong>, choose that agent, optionally enter a narrow read-only workspace, set the task limit and click <strong>Start automatic worker</strong>. Existing queued tasks are eligible.</li>
+        <li>For a reviewer, choose the researcher under <strong>Wait for another agent</strong>. It waits for pending research tasks, then receives completed results as explicitly shared evidence in the same project.</li>
+        <li>Send a task, then open <strong>View conversation</strong> for the answer. Use <strong>Stop worker</strong> to cancel. Failed/interrupted tasks require <strong>Retry worker task</strong>; they do not automatically spend another model call.</li>
+      </ol>
+      <p class="small text-secondary">Workers use your AI account allowance and a fresh invocation per task, with a three-minute limit. They provide only message/evidence analysis and optional visible-text workspace reads. No shell, writes, web or existing A2A access. Start workers again after a hub restart. Hidden/credential paths are excluded; ordinary visible project content you request may be sent to your selected model provider.</p>
 
       <h2 class="h5 mt-4">6. Hand off work and transfer evidence</h2>
       <ol>
@@ -104,7 +114,7 @@ node dist/cli.js demo --serve --port 47932</code></pre>
       <ul>
         <li><strong>Cannot connect:</strong> keep the hub running and confirm the credential file points to the correct instance.</li>
         <li><strong>Agent missing:</strong> check that both agents use the same project and are enabled.</li>
-        <li><strong>Message not answered:</strong> ask the recipient to read its inbox; check pause and MCP tool permissions.</li>
+        <li><strong>Message not answered:</strong> start its automatic worker or ask it to read its inbox; check pause, worker failures and MCP tool permissions.</li>
         <li><strong>Port occupied:</strong> choose a new data directory and unused port. Do not stop the other service.</li>
         <li><strong>Need a backup:</strong> stop only this hub and copy its entire private data directory, including SQLite sidecars.</li>
       </ul>
@@ -162,7 +172,7 @@ node dist/cli.js demo --serve --port 47932</code></pre>
       </div>
       <div class="row g-4">
         <aside class="col-12 col-lg-3">
-          <section class="panel mb-4"><div class="panel-heading"><h2>Agent directory</h2><span class="small text-secondary">Pull delivery</span></div><div id="agents" class="agent-list"></div><p class="panel-footnote">Connected indicates a recent adapter heartbeat, not model activity. Idle agents check their inbox when their host permits.</p></section>
+          <section class="panel mb-4"><div class="panel-heading"><h2>Agent directory</h2><span class="small text-secondary">Pull delivery</span></div><div id="agents" class="agent-list"></div><p class="panel-footnote">Connected indicates a recent adapter heartbeat, not model activity. Enable an automatic worker to process queued tasks; otherwise the host controls inbox checks.</p></section>
           <details class="panel"><summary class="panel-heading">Register an agent</summary><form id="agent-form" class="p-3">
             <label for="agent-name" class="form-label">Unique name</label><input id="agent-name" class="form-control mb-3" placeholder="reviewer" pattern="[a-z0-9][a-z0-9_\-]{0,63}" required>
             <label for="agent-project" class="form-label">Project</label><input id="agent-project" class="form-control mb-3" value="default" pattern="[a-z0-9][a-z0-9_\-]{0,63}" required>
@@ -190,8 +200,17 @@ node dist/cli.js demo --serve --port 47932</code></pre>
             <div class="row g-3 mb-3"><div class="col-sm-6"><label for="message-project" class="form-label">Project</label><input id="message-project" class="form-control" value="default" required pattern="[a-z0-9][a-z0-9_\-]{0,63}"></div><div class="col-sm-6"><label for="recipient" class="form-label">Recipient</label><select id="recipient" class="form-select" required></select></div></div>
             <label for="body" class="form-label">Message</label><textarea id="body" class="form-control" rows="3" required maxlength="16000" placeholder="Give an agent context or ask a question…"></textarea>
             <div class="d-flex flex-wrap gap-3 align-items-center mt-3"><button class="btn btn-primary" type="submit">Send message →</button><label class="form-check-label"><input id="question" type="checkbox" class="form-check-input me-1"> Question</label><button id="cancel-reply" type="button" class="btn btn-sm btn-link" hidden>Cancel reply</button></div>
-            <p class="form-text mb-0 mt-3">Sending stores the message. Automatic AI execution requires a separate host integration.</p>
+            <p class="form-text mb-0 mt-3">An enabled automatic worker picks up messages for its agent. Otherwise, ask the connected AI to check its inbox.</p>
           </form></section>
+          <section class="panel mt-4"><div class="panel-heading"><h2>Automatic inbox workers</h2><span class="small text-secondary">Opt-in · read-only</span></div>
+            <div class="p-3"><p class="small text-secondary">Start a dedicated Claude or Codex CLI for an agent. It checks every 5 seconds, handles one task at a time and replies automatically. Uses your signed-in AI account. No writes, shell commands, global hooks or existing A2A access.</p><div id="automatic-workers"></div>
+            <form id="worker-form"><div class="row g-3 mb-3"><div class="col-sm-6"><label for="worker-agent" class="form-label">Worker agent</label><select id="worker-agent" class="form-select" required></select></div><div class="col-sm-6"><label for="worker-provider" class="form-label">AI CLI</label><select id="worker-provider" class="form-select"><option value="claude">Claude</option><option value="codex">Codex</option></select></div></div>
+              <label for="worker-workspace" class="form-label">Read-only workspace (optional)</label><input id="worker-workspace" class="form-control mb-2" placeholder="/absolute/path/to/project"><p class="form-text">Leave blank to work only with messages and attached text evidence. Hidden files and credential paths are excluded. Use a dedicated agent identity, not one being operated manually.</p>
+              <label for="worker-max-jobs" class="form-label">Task limit before stopping</label><input id="worker-max-jobs" type="number" class="form-control mb-3" value="25" min="1" max="100" required>
+              <label for="worker-dependency" class="form-label">Wait for another agent (optional)</label><select id="worker-dependency" class="form-select mb-2"><option value="">Start independently</option></select><p class="form-text">For a reviewer, choose the researcher/coder in the same project. Waits for its pending work, then shares its completed results as evidence with this agent.</p>
+              <button class="btn btn-primary" type="submit">Start automatic worker</button>
+            </form><p class="form-text mb-0 mt-3">Each task has a 3-minute limit. Plain agent replies are acknowledged without another model response. Failed/interrupted tasks need an explicit retry. Workers stop when this hub stops; restart them here when needed.</p></div>
+          </section>
         </section>
         <aside class="col-12 col-lg-3"><section class="panel"><div class="panel-heading"><h2>Delivery activity</h2></div><div id="events" class="event-list"></div></section><div class="local-note mt-3"><span class="local-dot"></span><div><strong>Local and isolated</strong><p>This hub does not use your existing A2A mailbox or wake terminal sessions.</p></div></div></aside>
       </div>

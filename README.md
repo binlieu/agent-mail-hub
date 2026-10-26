@@ -2,7 +2,7 @@
 
 A local, model-independent agent mailbox with an MCP interface, SQLite persistence, and a bundled web dashboard. One Node.js package provides the hub, dashboard, CLI, and per-agent MCP adapters.
 
-**Status:** first milestone, local-only. Fourteen MCP tools and an HTTP API. Pull delivery; no automatic AI invocation, terminal wake, provider login, or standards-based A2A gateway. The demo uses two deterministic simulated agents over actual MCP connections. A separate [live end-to-end test](docs/live-e2e.md) verified real Claude Code and Codex CLI sessions. The bundled demo itself remains simulated.
+**Status:** first milestone, local-only. Fourteen MCP tools and an HTTP API. Durable pull delivery with optional bounded Claude/Codex inbox workers. No terminal wake, provider login management, or standards-based A2A gateway. The demo uses two deterministic simulated agents over actual MCP connections. A separate [live end-to-end test](docs/live-e2e.md) verified real Claude Code and Codex CLI sessions. The bundled demo itself remains simulated.
 
 ## In-app usage guide
 
@@ -155,6 +155,8 @@ Presets were reviewed on October 25, 2026 against [Claude Code model configurati
 Agent cards also show host-reported context used/free, context tokens left when exposed, consumed tokens, and shared account allowance with reset times. These require the opt-in [usage reporter](docs/usage-metrics.md): Claude status-line JSON or an explicitly chosen Codex session log. Codex can additionally read its CLI account limits without sending a prompt. Missing values stay unavailable; readings older than five minutes are stale. Existing A2A and global AI settings are not edited.
 
 Open **Examples & prompts** in the dashboard's top bar (`/examples.html`) for complete setup commands, copyable role prompts and expected checks: Codex PM / Claude worker, Claude PM / Codex worker, Claude reviewer / Codex coder, and handoffs in both directions. The page is public on your local hub. It does not launch models or send messages; run each step manually in the named session. The code-review case uses a new scratch directory and a deliberate failing test, followed by review, fix and a real test rerun.
+
+Message bodies and handoff details render Markdown locally, including tables and fenced code blocks. In the conversation popup, **Show Markdown source** displays the original text. Raw HTML is shown as text, unsafe links are removed, and images are displayed as labels without fetching remote content. Formatting does not change stored messages or evidence.
 - Disable an agent to revoke its access. Re-enabling restores access using the same credential.
 - Pause delivery to block new sends and inbox reads. Existing messages and acknowledgements remain stored. Resume before continuing the test.
 
@@ -203,3 +205,7 @@ npm run test:ui
 ```
 
 The UI check creates its own isolated data directory and temporary port. It tests sign-in, safe rendering of untrusted text, conversations, pause/resume, human messages/replies, registration and credential download, disabling/re-enabling, mobile layout, and sign-out. Set `AMH_TEST_BROWSER` to an existing Chromium executable if you do not want to download a browser. Browser testing is a development dependency; end users need only a normal web browser.
+
+## Automatic Claude / Codex inbox workers
+
+Open **Automatic inbox workers** in the dashboard. Choose an agent and its registered provider, optionally select a read-only workspace, set a task limit, and click **Start automatic worker**. Existing queued tasks are picked up. Your installed CLI must already be signed in. See [the worker guide](docs/automatic-workers.md) for setup, review dependencies, failure handling, and verified real-model samples.

@@ -20,7 +20,7 @@ SQLite uses WAL, foreign keys, prepared statements, relevant indexes, and a busy
 
 The persisted mailbox is the delivery queue. A sender commits a message as `queued`; the recipient pulls it with `read_inbox`. This records `delivered`, not `acknowledged`. A recipient explicitly acknowledges or replies. A reply shares the original conversation ID and marks the original answered.
 
-There is no push worker, external broker, or automatic LLM execution in milestone one. Offline delivery works because messages remain stored until an adapter reads them. A host may poll at task boundaries. Inbox results include acknowledged messages too; use `nextCursor` for incremental reads, or replay from zero for recovery. Data is never removed automatically.
+There is no external broker. The optional managed Claude/Codex worker polls this mailbox and invokes a dedicated bounded CLI per task; see [automatic workers](automatic-workers.md). The ordinary MCP adapter remains pull-based. Offline delivery works because messages remain stored until an adapter reads them. A host may poll at task boundaries. Inbox results include acknowledged messages too; use `nextCursor` for incremental reads, or replay from zero for recovery. Data is never removed automatically.
 
 Retries use a caller-supplied idempotency key, unique within project and sender. Identical requests return the existing message. Reusing the key with different content returns conflict. This prevents duplicate message records; application side effects still need their own idempotency.
 
@@ -48,4 +48,4 @@ Setup rejects known A2A directory names and existing unrelated contents. Conflic
 
 ## Limits and future work
 
-The local pilot has one project per agent, a directory limit of 500 agents, 16,000 characters per message, pages of at most 100 messages, and synchronous SQLite transactions. Dashboard aggregates use simple indexed queries suitable for this scale. Before a shared deployment, add measured load testing, remote authentication, credential rotation, migrations, retention policy, platform CI, and supported host wake adapters. Preserve message semantics when adding a standards-based A2A gateway.
+The local pilot has one project per agent, a directory limit of 500 agents, 16,000 characters per message, pages of at most 100 messages, and synchronous SQLite transactions. Dashboard aggregates use simple indexed queries suitable for this scale. Before a shared deployment, add measured load testing, remote authentication, credential rotation, migrations, retention policy, platform CI, and broader host adapters. Preserve message semantics when adding a standards-based A2A gateway.

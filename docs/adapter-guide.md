@@ -4,7 +4,7 @@
 
 1. **Host supports local MCP:** run `agent-mail-hub mcp` with `AMH_CREDENTIALS_FILE` pointing to a private credential file. The host controls when the AI calls inbox tools.
 2. **Host can make HTTP requests:** implement the contract in docs/api.md. Use examples/http-agent.mjs as a dependency-free starting point.
-3. **Host needs unattended execution:** implement a separate runner using its supported API or hook. The hub alone cannot wake a model. Never type blindly into a terminal or change existing hooks.
+3. **Host needs unattended execution:** use the opt-in [Claude/Codex inbox workers](automatic-workers.md) for bounded read-only tasks, or implement a separate runner using its supported API. The ordinary MCP adapter alone cannot wake a model. Never type blindly into a terminal or change existing hooks.
 
 Provider login stays with the host. Messaging does not need OpenAI, Anthropic, or other provider keys. An optional provider API runner needs its own credentials and billing limits.
 
