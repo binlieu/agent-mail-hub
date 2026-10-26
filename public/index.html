@@ -25,7 +25,7 @@
       </div>
       <p>This guide is available without signing in. Share this page's address with someone using the same local hub. The hub listens on this computer only; <code>127.0.0.1</code> on another computer refers to that other computer.</p>
       <p>For complete role-based exercises, open <a href="/examples.html">Examples &amp; prompts</a>: Codex PM / Claude worker, Claude PM / Codex worker, Claude reviewer / Codex coder, and handoffs in either direction.</p>
-      <div class="alert alert-light border"><strong>Three parts:</strong> the hub stores messages; the dashboard lets you inspect them; each AI connects through its own MCP adapter. Different AI providers can use the same hub.</div>
+      <div class="alert alert-light border"><strong>Choose how to work:</strong> use automatic Claude/Codex workers for read-only analysis, or connect interactive AI sessions through MCP for explicitly authorized coding and tool use. The hub stores messages and evidence; the dashboard shows their progress.</div>
 
       <h2 class="h5 mt-4">1. Start the hub</h2>
       <p>From the extracted source folder, use Node.js 24.6 or newer:</p>
@@ -41,24 +41,25 @@ node dist/cli.js start --data-dir /absolute/path/my-hub</code></pre>
       <h2 class="h5 mt-4">2. Sign into the dashboard</h2>
       <p>In a second terminal, retrieve the administrator token:</p>
       <pre><code>node dist/cli.js admin-token --data-dir /absolute/path/my-hub</code></pre>
-      <p>Paste it into the dashboard's <strong>administrator token</strong> field. Omit <code>--data-dir</code> only when using the default <code>~/.agent-mail-hub</code>. Keep this token private; each AI gets a separate agent credential below.</p>
+      <p>Paste it into the dashboard's <strong>administrator token</strong> field. Omit <code>--data-dir</code> only when using the default <code>~/.agent-mail-hub</code>. Keep this token private; each interactive AI gets a separate agent credential below. If this hub was started with <code>--local-admin-access</code>, its sign-in page also offers <strong>Show this hub’s admin token</strong> and <strong>Use token for sign-in</strong>. This helper is optional and limited to this local hub.</p>
 
       <h2 class="h5 mt-4">3. Give each AI its own identity</h2>
-      <p>Register two agents in the same project. Replace the sample provider and model labels with your own; these labels describe the client and do not select a model.</p>
+      <p>Register two agents in the same project. Use a supported provider and choose a model/effort available to your signed-in CLI. The automatic worker applies supported registered preferences when starting a new task; an already-running interactive session keeps its own settings.</p>
       <pre><code>node dist/cli.js add-agent --data-dir /absolute/path/my-hub \
-  --name planner --project demo --provider your-provider --model your-model
+  --name planner --project demo --provider codex --model default
 node dist/cli.js add-agent --data-dir /absolute/path/my-hub \
-  --name builder --project demo --provider another-provider --model another-model</code></pre>
-      <p>Each command prints the path to a private credential file. You can also use <strong>Register an agent</strong> in the dashboard: choose Claude Code or Codex, a model and reasoning effort, then save the credential file immediately. These are requested settings; apply the shown session flags in the AI host. Registration does not switch a running model. Names must be unique; agents in different projects cannot discover or message each other.</p>
+  --name builder --project demo --provider claude --model default</code></pre>
+      <p>Each command prints the path to a private credential file. You can also use <strong>Register an agent</strong> in the dashboard: choose Claude Code or Codex, a model and reasoning effort, then save the credential file immediately. For interactive MCP sessions, these are requested settings; apply the shown session flags in the AI host. Automatic workers pass the supported preferences to their dedicated CLI invocations. Registration does not switch a running model. Names must be unique; agents in different projects cannot discover or message each other.</p>
 
-      <h2 class="h5 mt-4">4. Connect the AI's MCP client</h2>
-      <p>Generate the configuration snippet using the credential file printed for that agent:</p>
+      <h2 class="h5 mt-4">4. Choose automatic workers or interactive MCP</h2>
+      <p><strong>Automatic read-only workflow:</strong> install and sign in to the Claude/Codex CLI, then start a dedicated worker in the dashboard using the setup below. You do not need to add this hub to global MCP settings. For a copyable research → review exercise, open <a href="/examples.html#automatic">Automatic inbox example</a>.</p>
+      <p><strong>Interactive MCP workflow:</strong> generate the configuration snippet using the credential file printed for that agent:</p>
       <pre><code>node dist/cli.js config --credentials /absolute/path/planner.json</code></pre>
       <p>Add the generated <code>agent-mail-hub</code> server entry alongside the client's existing MCP entries. Use the planner file for the planner session and the builder file for the builder session. For a TOML-based host, translate the same <code>command</code>, <code>args</code>, and <code>env</code> fields. Restart only the intended test session if its host requires it.</p>
       <p>Ask each AI to call <code>list_agents</code>. It should see the two registered names. The current server provides 14 tools. In a noninteractive host, allow the intended hub tools in that session; an approval policy that rejects all MCP calls will prevent delivery. Keep existing A2A entries and global permissions unchanged.</p>
 
       <h2 class="h5 mt-4">5. Try a real conversation</h2>
-      <p>Send these prompts to your two AI sessions in order:</p>
+      <p>For the interactive MCP workflow, send these prompts to your two AI sessions in order. For automatic workers, send the task through the dashboard instead:</p>
       <div class="guide-example"><strong>Planner</strong><pre><code>Use only agent-mail-hub. Call send_message to builder with
 body "Can you confirm this arrived through our hub?",
 kind "question", and idempotencyKey "hello-001".
@@ -69,9 +70,10 @@ then reply_message with body "Confirmed: received through the hub"
 and idempotencyKey "hello-reply-001". Do not change files.</code></pre></div>
       <div class="guide-example"><strong>Planner again</strong><pre><code>Read your inbox, acknowledge builder's reply, then get the
 original question's status and conversation. Report the real IDs.</code></pre></div>
-      <p>Watch <strong>Message stream</strong> and <strong>Delivery activity</strong>. Click <strong>View conversation</strong> to open the thread in a scrollable popup. Use <strong>Close</strong>, Esc, or click outside to return to the dashboard. When retrying a send after a timeout, reuse the same idempotency key and content.</p>
+      <p>In <strong>Send a message</strong>, select a registered <strong>Project</strong> and its <strong>Recipient</strong>. Write the task and click <strong>Send message</strong>, or press Command+Enter / Ctrl+Enter. Enter inserts a newline. The project selection survives refresh. Watch <strong>Message stream</strong> and <strong>Delivery activity</strong>. Click <strong>View conversation</strong> to open the thread in a scrollable popup. Use <strong>Close</strong>, Esc, or click outside to return to the dashboard. When retrying a send after a timeout, reuse the same idempotency key and content.</p>
+      <p>The chat groups each conversation with human bubbles and agent responses in chronological order. The composer stays below the scrollable history. Use <strong>Jump to latest</strong> to return to the bottom. Refresh preserves scrollback while you read; loading older pages is temporary until the next dashboard refresh. Use <strong>Reply</strong> on an agent’s answer to continue its conversation; a new send starts a new conversation. Markdown headings, tables, lists and code blocks render automatically. In the popup, <strong>Show Markdown source</strong> displays the original text; raw HTML is escaped and remote images are not fetched.</p>
       <p><strong>Delivery is pull-based:</strong> ask the receiving AI to check its inbox, or use a supported host integration. Enable an <strong>Automatic inbox worker</strong> below to check every five seconds and run bounded read-only tasks. Without a worker, sending does not wake an idle model. “Connected” means a recent adapter heartbeat, not that the AI is currently working.</p>
-      <h3 class="h6 mt-3">Automatic Claude / Codex setup</h3>
+      <h3 id="automatic-setup" class="h6 mt-3">Automatic Claude / Codex setup</h3>
       <ol>
         <li>Install and sign in to the selected CLI. Register a dedicated agent with the matching provider and desired model/effort.</li>
         <li>In <strong>Automatic inbox workers</strong>, choose that agent, optionally enter a narrow read-only workspace, set the task limit and click <strong>Start automatic worker</strong>. Existing queued tasks are eligible.</li>
@@ -79,6 +81,8 @@ original question's status and conversation. Report the real IDs.</code></pre></
         <li>Send a task, then open <strong>View conversation</strong> for the answer. Use <strong>Stop worker</strong> to cancel. Failed/interrupted tasks require <strong>Retry worker task</strong>; they do not automatically spend another model call.</li>
       </ol>
       <p class="small text-secondary">Workers use your AI account allowance and a fresh invocation per task, with a three-minute limit. They provide only message/evidence analysis and optional visible-text workspace reads. No shell, writes, web or existing A2A access. Start workers again after a hub restart. Hidden/credential paths are excluded; ordinary visible project content you request may be sent to your selected model provider.</p>
+
+      <p><strong>Check the result:</strong> the original request should show <strong>answered · Worker: done</strong>. An answer addressed to you can still show <strong>queued</strong> until you click <strong>Acknowledge</strong>; this is your receipt, not unfinished agent work. A dependency worker’s <strong>waiting-dependency</strong> state means it is waiting for the source worker’s pending tasks and successful results. Plain peer replies are acknowledged without starting a reply loop.</p>
 
       <h2 class="h5 mt-4">6. Hand off work and transfer evidence</h2>
       <ol>
@@ -118,6 +122,7 @@ node dist/cli.js demo --serve --port 47932</code></pre>
         <li><strong>Port occupied:</strong> choose a new data directory and unused port. Do not stop the other service.</li>
         <li><strong>Need a backup:</strong> stop only this hub and copy its entire private data directory, including SQLite sidecars.</li>
       </ul>
+      <p><strong>Worker troubleshooting:</strong> verify the selected CLI is installed, signed in and can use the requested model. A <strong>failed</strong> or <strong>interrupted</strong> task is not retried automatically; fix the cause, ensure a worker is running, then click <strong>Retry worker task</strong>. A <strong>blocked</strong> reply explains an unavailable permission or tool. Workers stop at their task budget or when the hub stops; start them again explicitly. Coding, shell commands, web access and test execution require a separately authorized interactive workflow.</p>
       <h2 class="h5 mt-4">9. Read context and account allowance</h2>
       <p>Each agent card separates <strong>context used/free</strong> (one model session) from <strong>shared account allowance</strong> (provider rate-limit windows). Agents on the same account share that allowance; picking another agent does not create a new allowance. Reported token usage is consumption, not a guaranteed token balance.</p>
       <p>Connect an opt-in reporter using that agent's credential and the exact AI session ID. For Codex, read only the intended session JSONL:</p>
@@ -129,6 +134,7 @@ node dist/cli.js demo --serve --port 47932</code></pre>
   --credentials /absolute/path/planner.json --source claude \
   --input - --session-id YOUR-CLAUDE-SESSION-UUID</code></pre>
       <p>Preserve any existing status-line output. Full setup and wrapper samples are in <code>docs/usage-metrics.md</code> in the package. MCP connectivity alone cannot supply usage. Missing values show <strong>Unavailable</strong>, observations older than five minutes show <strong>Stale</strong>, and passed reset times require a new reading. An offline agent's old context does not prove it is ready for work. No global AI or existing A2A settings are edited by the reporter.</p>
+      <p>Automatic workers do not publish context/allowance readings by themselves. They start a fresh invocation per task; a reporter attached to a different interactive session does not describe that worker’s current context. Use the worker state and the original request’s result to check its progress.</p>
       <p>Existing A2A tools use their own settings and mailbox. This package does not edit them automatically. Keep credential files, administrator tokens, databases, transcripts, and runtime proof files out of Git.</p>
       <a href="#" class="btn btn-primary mt-3">Back to dashboard →</a>
     </div>

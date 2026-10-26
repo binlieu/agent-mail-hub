@@ -224,6 +224,14 @@ try {
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   assert.equal(copied, await page.locator('#case1-pm').textContent());
   assert.match(copied, /create_handoff to claude-worker/);
+  await page.getByRole('link',{name:'Automatic inbox example',exact:true}).click();
+  await page.getByRole('heading',{name:'Automatic research and review',exact:true}).waitFor();
+  assert.match(page.url(),/#automatic$/);
+  await page.getByRole('button',{name:'Copy automatic research task',exact:true}).click();
+  await page.locator('#copy-status').filter({hasText:/Copied: Copy automatic research task/}).waitFor();
+  assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),await page.locator('#automatic-research').textContent());
+  assert.match(await page.locator('#automatic-review').textContent(),/Review every supplied evidence item/);
+  assert.match(await page.locator('#automatic').innerText(),/no automatic dispatch by the PM/);
   await page.getByRole('link', {name:'4. Handoff either way',exact:true}).click();
   assert.match(page.url(), /#handoff$/);
   assert.match(await page.locator('#handoff-codex-source').textContent(), /NEW handoff to transfer-claude/);
@@ -233,6 +241,13 @@ try {
   await page.setViewportSize({width:1440,height:1100});
   await page.getByRole('link',{name:'1. Codex PM / Claude worker',exact:true}).click();
   await page.screenshot({path:join(directory,'examples-desktop.png'),fullPage:true});
+  await page.goto(hub.url+'/#how-to-use');
+  await page.getByRole('heading',{name:'How to use Agent Mail Hub',exact:true}).waitFor();
+  assert.match(await page.locator('#how-to-use').innerText(),/Jump to latest/);
+  assert.match(await page.locator('#how-to-use').innerText(),/Show Markdown source/);
+  assert.match(await page.locator('#how-to-use').innerText(),/Retry worker task/);
+  await page.getByRole('link',{name:'Automatic inbox example',exact:true}).click();
+  await page.getByRole('heading',{name:'Automatic research and review',exact:true}).waitFor();
   assert.deepEqual(errors, []);
   console.log(`PASS: dashboard sign-in, safe Markdown, grouped chat, scrollback, keyboard send/reply, conversations, pause/resume, registration/download, disable/enable, mobile layout, handoff context/result display, checksum-verified evidence download and sign-out.\nBrowser artifacts: ${directory}`);
 } finally { await browser.close(); await hub.close(); }

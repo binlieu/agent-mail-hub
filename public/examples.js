@@ -7,7 +7,7 @@ for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(code.textContent);
-      document.getElementById('copy-status').textContent = `Copied: ${button.getAttribute('aria-label')}. Paste it into the indicated session.`;
+      document.getElementById('copy-status').textContent = `Copied: ${button.getAttribute('aria-label')}. Paste it into the indicated dashboard, terminal or AI session.`;
     } catch {
       const selection = window.getSelection();
       const range = document.createRange(); range.selectNodeContents(code);
