@@ -28,6 +28,33 @@ async function fixture() {
 }
 function message(to, key = randomUUID(), body = 'Hello') { return { to, body, kind: 'question', idempotencyKey: key }; }
 
+test('requested model preferences validate supported effort and survive restart', async () => {
+  const f = await fixture();
+  let closed = false;
+  try {
+    assert.equal((await f.api('invalid', '/api/model-options')).status, 401);
+    const catalog = await f.api(f.config.adminToken, '/api/model-options');
+    assert.deepEqual(catalog.data.providers.map(item => item.id), ['claude', 'codex']);
+    const register = (name, provider, model, reasoningEffort) => f.api(f.config.adminToken, '/api/agents', 'POST', { name, provider, model, reasoningEffort });
+    assert.equal((await register('codex-high', 'codex', 'gpt-6-luna', 'high')).status, 201);
+    assert.equal((await register('claude-high', 'claude', 'sonnet', 'high')).status, 201);
+    assert.equal((await register('custom', 'claude', 'custom-model', 'default')).status, 201);
+    assert.equal((await register('invalid-luna', 'codex', 'gpt-6-luna', 'ultra')).status, 400);
+    assert.equal((await register('invalid-claude', 'claude', 'opus', 'ultra')).status, 400);
+    assert.equal((await register('invalid-custom', 'claude', 'unknown', 'high')).status, 400);
+    assert.equal((await register('invalid-provider', 'other', 'unknown', 'default')).status, 400);
+    await f.hub.close(); closed = true;
+    const restarted = await startHub(f.dir, loadConfig(f.dir), 0);
+    try {
+      const agents = restarted.store.listAgents(f.admin);
+      assert.equal(agents.find(item => item.name === 'codex-high').reasoningEffort, 'high');
+      assert.equal(agents.find(item => item.name === 'claude-high').configurationStatus, 'requested');
+      assert.equal(agents.find(item => item.name === 'alice').reasoningEffort, 'default');
+      assert.ok(!agents.some(item => item.name.startsWith('invalid-')));
+    } finally { await restarted.close(); }
+  } finally { if (!closed) await f.hub.close(); }
+});
+
 test('durable inbox, explicit acknowledgement, reply correlation, retries and restart', async () => {
   const f = await fixture();
   let closed = false;

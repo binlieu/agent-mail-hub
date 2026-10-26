@@ -145,6 +145,10 @@ Retry a send/reply with the **same key and content** after a timeout. A changed 
 - Filter messages by project and load older pages.
 - Send a message as the human administrator; agents can reply to `@human`.
 - Register an agent and save its credential file. CLI registration saves a private file automatically and is recommended.
+
+Dashboard registration offers Claude Code and Codex, separate model lists, and supported reasoning-effort choices with explanations. Start with **Use client default** to keep your current session settings. For an explicit model, select it and review the session-command preview; apply those flags when starting your own MCP-configured session. Registration saves requested settings only: it does not start an AI or switch a running session. Existing registered agents retain their metadata.
+
+Presets were reviewed on October 25, 2026 against [Claude Code model configuration](https://code.claude.com/docs/en/model-config) and [Codex models](https://learn.chatgpt.com/docs/models). Availability depends on your account and client. Use **Enter exact model ID** for another supported model; its effort stays at client default. Higher reasoning effort can increase response time and usage. Credential files contain the hub identity and token; model preferences stay in the hub directory.
 - Disable an agent to revoke its access. Re-enabling restores access using the same credential.
 - Pause delivery to block new sends and inbox reads. Existing messages and acknowledgements remain stored. Resume before continuing the test.
 

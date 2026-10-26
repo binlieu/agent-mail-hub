@@ -3,6 +3,7 @@ import { chmodSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { HubError, requireAdmin, type Actor, type NewAgent, type NewMessage, type Page, type NewEvidence, type EvidenceReview, type NewHandoff, type HandoffUpdate } from './contracts.js';
 import { secret } from './config.js';
+import { validateModelPreference } from './model-options.js';
 
 type Row = Record<string, any>;
 const hash = (token: string): string => createHash('sha256').update(token).digest('hex');
@@ -95,11 +96,13 @@ export class Store {
   }
   createAgent(actor: Actor, input: NewAgent): Row {
     requireAdmin(actor);
+    validateModelPreference(input.provider, input.model, input.reasoningEffort);
     return this.transaction(() => {
       if (this.db.prepare('SELECT name FROM agents WHERE name=?').get(input.name)) throw new HubError(409, 'Agent name already exists');
       const token = secret();
       this.db.prepare('INSERT INTO agents(name,project,provider,model,capabilities,token_hash,created_at) VALUES(?,?,?,?,?,?,?)')
         .run(input.name, input.project, input.provider, input.model, JSON.stringify(input.capabilities), hash(token), now());
+      if (input.reasoningEffort !== undefined) this.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(`agent_effort:${input.name}`, input.reasoningEffort);
       this.event(input.project, 'human', `agent_created:${input.name}`);
       return { ...input, token };
     });
@@ -130,7 +133,7 @@ export class Store {
       const last = this.db.prepare('SELECT host,last_seen,connected FROM sessions WHERE agent=? ORDER BY last_seen DESC LIMIT 1').get(row.name!);
       const active = this.db.prepare('SELECT count(*) AS count FROM sessions WHERE agent=? AND connected=1 AND last_seen>?').get(row.name!, new Date(Date.now() - 60000).toISOString());
       const unread = this.db.prepare('SELECT count(*) AS count FROM messages WHERE recipient=? AND acknowledged_at IS NULL').get(row.name!);
-      return { ...row, enabled: Boolean(row.enabled), capabilities: JSON.parse(String(row.capabilities)), lastSeen: last?.last_seen ?? null,
+      return { ...row, reasoningEffort: this.db.prepare('SELECT value FROM meta WHERE key=?').get(`agent_effort:${row.name}`)?.value ?? 'default', configurationStatus: 'requested', enabled: Boolean(row.enabled), capabilities: JSON.parse(String(row.capabilities)), lastSeen: last?.last_seen ?? null,
         host: last?.host ?? null, connected: Boolean(Number(active?.count)) && Boolean(row.enabled), unread: Number(unread?.count), deliveryMode: 'poll' };
     });
   }

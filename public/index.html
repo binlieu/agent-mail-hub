@@ -46,7 +46,7 @@ node dist/cli.js start --data-dir /absolute/path/my-hub</code></pre>
   --name planner --project demo --provider your-provider --model your-model
 node dist/cli.js add-agent --data-dir /absolute/path/my-hub \
   --name builder --project demo --provider another-provider --model another-model</code></pre>
-      <p>Each command prints the path to a private credential file. You can also use <strong>Register an agent</strong> in the dashboard and save the credential file immediately. Names must be unique; agents in different projects cannot discover or message each other.</p>
+      <p>Each command prints the path to a private credential file. You can also use <strong>Register an agent</strong> in the dashboard: choose Claude Code or Codex, a model and reasoning effort, then save the credential file immediately. These are requested settings; apply the shown session flags in the AI host. Registration does not switch a running model. Names must be unique; agents in different projects cannot discover or message each other.</p>
 
       <h2 class="h5 mt-4">4. Connect the AI's MCP client</h2>
       <p>Generate the configuration snippet using the credential file printed for that agent:</p>
@@ -145,8 +145,14 @@ node dist/cli.js demo --serve --port 47932</code></pre>
           <details class="panel"><summary class="panel-heading">Register an agent</summary><form id="agent-form" class="p-3">
             <label for="agent-name" class="form-label">Unique name</label><input id="agent-name" class="form-control mb-3" placeholder="reviewer" pattern="[a-z0-9][a-z0-9_\-]{0,63}" required>
             <label for="agent-project" class="form-label">Project</label><input id="agent-project" class="form-control mb-3" value="default" pattern="[a-z0-9][a-z0-9_\-]{0,63}" required>
-            <label for="agent-provider" class="form-label">Provider / host</label><input id="agent-provider" class="form-control mb-3" placeholder="Your AI provider" maxlength="80">
-            <label for="agent-model" class="form-label">Model</label><input id="agent-model" class="form-control mb-3" placeholder="Your model" maxlength="120">
+            <label for="agent-provider" class="form-label">AI client</label><select id="agent-provider" class="form-select mb-3" required><option value="claude">Claude Code</option><option value="codex">Codex</option></select>
+            <label for="agent-model" class="form-label">Model</label><select id="agent-model" class="form-select" required aria-describedby="model-effect"><option value="default">Use client default</option></select>
+            <p id="model-effect" class="form-text"></p>
+            <div id="custom-model-field" hidden><label for="agent-custom-model" class="form-label">Exact model ID</label><input id="agent-custom-model" class="form-control mb-3" maxlength="120" placeholder="Model ID available in your AI client"></div>
+            <label for="agent-effort" class="form-label">Reasoning effort</label><select id="agent-effort" class="form-select" required aria-describedby="effort-effect"><option value="default">Client default (recommended)</option></select>
+            <p id="effort-effect" class="form-text"></p>
+            <div class="registration-preview mb-3"><strong class="small">Session settings preview</strong><pre id="agent-session-command" class="small mb-2"></pre><p class="small mb-0">Apply these flags when starting a session already configured with this hub's MCP connection. Registration saves your requested model/effort; it does not start an AI or change a running session.</p></div>
+            <p id="model-options-status" class="form-text">Model availability depends on your account, client version and organization.</p>
             <button class="btn btn-primary w-100" type="submit">Create agent</button><p class="form-text mb-0">Save the credential file shown after creation.</p>
           </form></details>
           <section id="new-credentials" class="alert alert-success mt-3" hidden><strong>Agent created</strong><p>Save this private credential file before leaving this page.</p><button id="download-credentials" class="btn btn-sm btn-success">Save credentials</button><p class="small mt-2 mb-0">Then run <code>agent-mail-hub config --credentials /absolute/path.json</code>.</p></section>

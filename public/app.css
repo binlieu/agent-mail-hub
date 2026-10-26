@@ -16,3 +16,4 @@ body{background:#f5f7fa;color:var(--ink);font-family:system-ui,-apple-system,Bli
 .guide-example{margin:16px 0}
 .guide-example pre{margin-top:8px}
 @media(max-width:575px){.header-actions{gap:8px!important}.usage-guide{padding-left:12px;padding-right:12px}}
+.registration-preview{padding:12px;border:1px solid var(--line);border-radius:7px;background:#f5f7fa}.registration-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:8px}.registration-preview p{color:var(--muted);line-height:1.6}

@@ -11,6 +11,7 @@ export const agentSchema = z.object({
   project: slug.default('default'),
   provider: z.string().trim().max(80).default('unspecified'),
   model: z.string().trim().max(120).default('unspecified'),
+  reasoningEffort: z.enum(['default', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']).optional(),
   capabilities: z.array(z.string().trim().min(1).max(80)).max(20).default([])
 }).strict();
 export const messageSchema = z.object({

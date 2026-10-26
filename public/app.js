@@ -11,6 +11,46 @@ let threadId;
 let threadCursor = 0;
 let refreshing = false;
 let instanceId;
+let registrationOptions;
+
+function shellQuote(value) { return "'" + value.replaceAll("'", "'\"'\"'") + "'"; }
+function updateModelChoice(resetModel = false) {
+  if (!registrationOptions) return;
+  const provider = registrationOptions.providers.find(item => item.id === $('agent-provider').value);
+  if (resetModel) $('agent-model').replaceChildren(...provider.models.map(item => new Option(item.label, item.id)), new Option('Enter exact model ID…', 'custom'));
+  const model = provider.models.find(item => item.id === $('agent-model').value);
+  const custom = $('agent-model').value === 'custom';
+  $('custom-model-field').hidden = !custom; $('agent-custom-model').required = custom;
+  $('model-effect').textContent = model?.description || 'Use an exact model ID supported by your client. Configure its effort in the client.';
+  const previousEffort = $('agent-effort').value;
+  const efforts = model?.efforts || ['default'];
+  $('agent-effort').replaceChildren(...efforts.map(id => new Option(registrationOptions.efforts[id].label, id)));
+  $('agent-effort').value = efforts.includes(previousEffort) ? previousEffort : 'default';
+  updateSessionPreview();
+}
+function updateSessionPreview() {
+  if (!registrationOptions) return;
+  const provider = $('agent-provider').value;
+  const model = $('agent-model').value === 'custom' ? $('agent-custom-model').value.trim() : $('agent-model').value;
+  const effort = $('agent-effort').value;
+  $('effort-effect').textContent = registrationOptions.efforts[effort].description;
+  let command = provider;
+  if (model && model !== 'default') command += ` --model ${shellQuote(model)}`;
+  if (effort !== 'default') command += provider === 'claude' ? ` --effort ${shellQuote(effort)}` : ` -c ${shellQuote(`model_reasoning_effort="${effort}"`)}`;
+  $('agent-session-command').textContent = command;
+}
+async function loadModelOptions() {
+  const button = $('agent-form').querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    registrationOptions = await api('/api/model-options');
+    updateModelChoice(true);
+    $('model-options-status').textContent = `Presets reviewed ${registrationOptions.reviewedOn}. Availability depends on your account, client version and organization. These are requested settings, not verified session settings.`;
+    button.disabled = false;
+  } catch (failure) {
+    $('model-options-status').textContent = 'Model presets unavailable. Restart this hub with the updated app before registering an agent.';
+  }
+}
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -63,6 +103,7 @@ function renderAgents() {
     const title = element('div', undefined, 'agent-title');
     title.append(element('span', agent.name.slice(0, 2).toUpperCase(), 'avatar'), element('span', agent.name));
     card.append(title, element('div', `${agent.project} · ${agent.provider} / ${agent.model}`, 'agent-meta'));
+    card.append(element('div', `Requested effort: ${agent.reasoningEffort || 'default'} · Session settings are not verified`, 'agent-meta'));
     const footer = element('div', undefined, 'd-flex align-items-center justify-content-between gap-2 mt-3');
     footer.append(element('span', !agent.enabled ? 'Disabled' : agent.connected ? 'Adapter connected' : 'Offline / inbox available', `agent-status${agent.connected ? ' online' : ''}`));
     footer.append(action(agent.enabled ? 'Disable' : 'Enable', async () => { await api(`/api/agents/${agent.name}`, 'PATCH', { enabled: !agent.enabled }); await refresh(); }));
@@ -190,7 +231,7 @@ async function login() {
   instanceId = me.instanceId;
   sessionStorage.setItem('amh.dashboard.token', token);
   $('token').value = ''; $('login-panel').hidden = true; $('dashboard').hidden = false; $('logout').hidden = false;
-  clearInterval(polling); await refresh();
+  clearInterval(polling); await refresh(); await loadModelOptions();
   polling = setInterval(() => { if (!document.hidden) run(refresh); }, 4000);
 }
 $('login-form').addEventListener('submit', event => { event.preventDefault(); token = $('token').value.trim(); run(login); });
@@ -225,12 +266,19 @@ $('agent-form').addEventListener('submit', event => {
     if (createdCredentials) throw new Error('Save the previous credential file before creating another agent.');
     button.disabled = true;
     try {
-      const agent = await api('/api/agents', 'POST', { name: $('agent-name').value, project: $('agent-project').value, provider: $('agent-provider').value || 'unspecified', model: $('agent-model').value || 'unspecified' });
+      if (!registrationOptions) throw new Error('Model presets are not available yet.');
+      const model = $('agent-model').value === 'custom' ? $('agent-custom-model').value.trim() : $('agent-model').value;
+      const agent = await api('/api/agents', 'POST', { name: $('agent-name').value, project: $('agent-project').value, provider: $('agent-provider').value, model, reasoningEffort: $('agent-effort').value });
       createdCredentials = { version: 1, instanceId, url: `http://127.0.0.1:${location.port}`, name: agent.name, project: agent.project, token: agent.token };
       $('new-credentials').hidden = false; $('agent-name').value = ''; await refresh();
     } finally { button.disabled = false; }
   });
 });
+$('agent-provider').addEventListener('change', () => { $('agent-effort').value = 'default'; updateModelChoice(true); });
+$('agent-model').addEventListener('change', () => updateModelChoice());
+$('agent-effort').addEventListener('change', updateSessionPreview);
+$('agent-custom-model').addEventListener('input', updateSessionPreview);
+$('agent-form').querySelector('button[type="submit"]').disabled = true;
 $('download-credentials').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(createdCredentials, null, 2) + '\n'], { type: 'application/json' });
   const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = createdCredentials.name + '.json'; link.click();

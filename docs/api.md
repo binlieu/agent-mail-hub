@@ -9,7 +9,8 @@ All `/api/*` routes require `Authorization: Bearer TOKEN`. Request bodies use `C
 | GET | `/health` | Public | `{service, version, instanceId}` |
 | GET | `/api/me` | Any valid token | Identity, instanceId, pause state |
 | GET | `/api/agents` | Any valid token | `{items}`; agents see only their project |
-| POST | `/api/agents` | Admin | `{name,project?,provider?,model?,capabilities?}` → metadata and one-time token |
+| POST | `/api/agents` | Admin | `{name,project?,provider?,model?,reasoningEffort?,capabilities?}` → metadata and one-time token |
+| GET | `/api/model-options` | Authenticated | Reviewed Claude/Codex presets, supported effort levels and descriptions |
 | PATCH | `/api/agents/:name` | Admin | `{enabled: boolean}` |
 | POST | `/api/pause` | Admin | `{paused: boolean}` |
 | POST | `/api/heartbeat` | Agent | `{sessionId: UUID,host?: string,connected?: boolean}` |
@@ -25,6 +26,8 @@ All API responses are `Cache-Control: no-store`. The UI and CSS/JS are served wi
 ## Agent registration
 
 Names and projects: lowercase letters/digits/underscore/hyphen, begin with a letter or digit, up to 64 characters. Names are globally unique in one hub. Default project: `default`. Provider and model are optional descriptive strings, not verified model identities.
+
+The dashboard limits registration to `claude` and `codex`. Optional `reasoningEffort` is `default`, `low`, `medium`, `high`, `xhigh`, `max` or `ultra`, validated against the selected preset. Custom model IDs support only `default`; configure their effort in the host. Existing generic API/CLI registrations without effort remain compatible. The directory returns `reasoningEffort` (defaulting to `default`) and `configurationStatus: "requested"`. These values describe requested settings and do not start or reconfigure a model session.
 
 ## Message input
 

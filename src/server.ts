@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { Store } from './store.js';
+import { modelOptions } from './model-options.js';
 import { evidenceSchema, evidenceReviewSchema, handoffSchema, handoffUpdateSchema, agentSchema, heartbeatSchema, humanMessageSchema, identifier, messageSchema, pageSchema, slug, HubError, requireAdmin, type Actor } from './contracts.js';
 import { SERVICE, VERSION, type HubConfig } from './config.js';
 import { join } from 'node:path';
@@ -64,6 +65,7 @@ export async function startHub(directory: string, config: HubConfig, port = conf
       const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
       const actor: Actor | null = token && timingSafeEqual(digest(token), digest(config.adminToken)) ? { role: 'admin' } : store.authenticate(token);
       if (!actor) { authFailures++; throw new HubError(401, 'Valid bearer credentials required'); }
+      if (path === '/api/model-options' && req.method === 'GET') return json(res, 200, modelOptions);
       const page = () => pageSchema.parse(Object.fromEntries(url.searchParams));
       if (path === '/api/me' && req.method === 'GET') return json(res, 200, { ...actor, instanceId: config.instanceId, paused: store.paused() });
       if (path === '/api/agents' && req.method === 'GET') return json(res, 200, { items: store.listAgents(actor) });
