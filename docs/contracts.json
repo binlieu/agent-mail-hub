@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "schemas": {
+    "agentSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "project": {
+          "default": "default",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "provider": {
+          "default": "unspecified",
+          "type": "string",
+          "maxLength": 80
+        },
+        "model": {
+          "default": "unspecified",
+          "type": "string",
+          "maxLength": 120
+        },
+        "capabilities": {
+          "default": [],
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        }
+      },
+      "required": [
+        "name",
+        "project",
+        "provider",
+        "model",
+        "capabilities"
+      ],
+      "additionalProperties": false
+    },
+    "messageSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "to": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            {
+              "type": "string",
+              "const": "@human"
+            }
+          ]
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        },
+        "kind": {
+          "default": "message",
+          "type": "string",
+          "enum": [
+            "message",
+            "question"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "replyTo": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "to",
+        "body",
+        "kind",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    "humanMessageSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "to": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            {
+              "type": "string",
+              "const": "@human"
+            }
+          ]
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        },
+        "kind": {
+          "default": "message",
+          "type": "string",
+          "enum": [
+            "message",
+            "question"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "replyTo": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        }
+      },
+      "required": [
+        "to",
+        "body",
+        "kind",
+        "idempotencyKey",
+        "project"
+      ],
+      "additionalProperties": false
+    },
+    "heartbeatSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "host": {
+          "default": "custom",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "connected": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sessionId",
+        "host",
+        "connected"
+      ],
+      "additionalProperties": false
+    },
+    "pageSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "after": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "default": 50,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "after",
+        "limit"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

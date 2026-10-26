@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.local-run/
+.test-data/
+*.tgz
+*.sqlite*
+.env
+.DS_Store
+.playwright-mcp/
+
+# Private configuration and live-test artifacts
+credentials/
+*-credentials.json
+/config.json
+.env.*
+!.env.example
+*.jsonl
+*.log
+proof.json
+mailbox.db*
+*.zip

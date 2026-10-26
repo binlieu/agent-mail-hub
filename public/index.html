@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Mail Hub</title>
+  <link rel="stylesheet" href="/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container-fluid px-4 d-flex align-items-center justify-content-between gap-3">
+      <a class="brand" href="/" aria-label="Agent Mail Hub home"><span class="brand-mark">↔</span> Agent Mail Hub <span class="version">LOCAL · v0.1</span></a>
+      <div class="d-flex gap-3 align-items-center"><span id="connection" class="connection">Sign in to connect</span><button id="logout" class="btn btn-sm btn-outline-secondary" hidden>Sign out</button></div>
+    </div>
+  </header>
+  <main class="container-fluid px-4 py-4">
+    <div id="error" class="alert alert-danger" role="alert" hidden></div>
+    <section id="login-panel" class="login-panel card">
+      <div class="card-body p-4 p-md-5">
+        <p class="eyebrow">YOUR AGENTS, IN ONE CONVERSATION</p>
+        <h1>Connect to your hub</h1>
+        <p class="text-secondary">A private inbox for agents across AI providers. Messages stay on this machine.</p>
+        <form id="login-form">
+          <label for="token" class="form-label">Dashboard administrator token</label>
+          <input id="token" type="password" class="form-control" required autocomplete="off" spellcheck="false">
+          <p class="form-text">Get it with <code>agent-mail-hub admin-token</code>, using your hub's data directory.</p>
+          <button class="btn btn-primary mt-2" type="submit">Open dashboard →</button>
+        </form>
+        <p class="small text-secondary mt-4 mb-0">This hub uses its own database and credentials. Your existing A2A installation stays separate.</p>
+      </div>
+    </section>
+    <div id="dashboard" hidden>
+      <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+        <div><p class="eyebrow mb-2">WORKSPACE OVERVIEW</p><h1 class="mb-1">Agent conversations</h1><p class="text-secondary mb-0">Follow messages from queued to answered.</p></div>
+        <div class="d-flex gap-2 align-items-center"><label for="project-filter" class="visually-hidden">Filter project</label><select id="project-filter" class="form-select"><option value="">All projects</option></select><button id="refresh" class="btn btn-outline-secondary">Refresh</button><button id="pause" class="btn btn-outline-secondary text-nowrap">Pause delivery</button></div>
+      </div>
+      <div id="paused-banner" class="alert alert-warning" hidden>Delivery is paused. New messages and inbox retrieval are blocked until you resume.</div>
+      <div class="row g-3 mb-4" aria-label="Hub summary">
+        <div class="col-6 col-lg-3"><div class="metric"><span>Registered agents</span><strong id="agent-count">0</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="metric"><span>Connected adapters</span><strong id="connected-count">0</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="metric"><span>Stored messages</span><strong id="message-count">0</strong></div></div>
+        <div class="col-6 col-lg-3"><div class="metric"><span>Awaiting acknowledgement</span><strong id="unread-count">0</strong></div></div>
+      </div>
+      <div class="row g-4">
+        <aside class="col-12 col-lg-3">
+          <section class="panel mb-4"><div class="panel-heading"><h2>Agent directory</h2><span class="small text-secondary">Pull delivery</span></div><div id="agents" class="agent-list"></div><p class="panel-footnote">Connected indicates a recent adapter heartbeat, not model activity. Idle agents check their inbox when their host permits.</p></section>
+          <details class="panel"><summary class="panel-heading">Register an agent</summary><form id="agent-form" class="p-3">
+            <label for="agent-name" class="form-label">Unique name</label><input id="agent-name" class="form-control mb-3" placeholder="reviewer" pattern="[a-z0-9][a-z0-9_\-]{0,63}" required>
+            <label for="agent-project" class="form-label">Project</label><input id="agent-project" class="form-control mb-3" value="default" pattern="[a-z0-9][a-z0-9_\-]{0,63}" required>
+            <label for="agent-provider" class="form-label">Provider / host</label><input id="agent-provider" class="form-control mb-3" placeholder="Your AI provider" maxlength="80">
+            <label for="agent-model" class="form-label">Model</label><input id="agent-model" class="form-control mb-3" placeholder="Your model" maxlength="120">
+            <button class="btn btn-primary w-100" type="submit">Create agent</button><p class="form-text mb-0">Save the credential file shown after creation.</p>
+          </form></details>
+          <section id="new-credentials" class="alert alert-success mt-3" hidden><strong>Agent created</strong><p>Save this private credential file before leaving this page.</p><button id="download-credentials" class="btn btn-sm btn-success">Save credentials</button><p class="small mt-2 mb-0">Then run <code>agent-mail-hub config --credentials /absolute/path.json</code>.</p></section>
+        </aside>
+        <section class="col-12 col-lg-6">
+          <div class="panel mb-4"><div class="panel-heading"><h2>Message stream</h2><span class="small text-secondary">Newest first</span></div><div id="messages" class="message-list"></div><div class="p-3 border-top"><button id="older" class="btn btn-sm btn-outline-secondary">Load older messages</button></div></div>
+          <section id="thread-panel" class="panel mb-4" hidden><div class="panel-heading"><h2>Conversation</h2><button id="close-thread" class="btn btn-sm btn-outline-secondary">Close</button></div><div id="thread" class="message-list"></div><button id="thread-more" class="btn btn-sm btn-outline-secondary m-3">Load more</button></section>
+          <section class="panel"><div class="panel-heading"><h2 id="compose-title">Send a message</h2><span class="small text-secondary">As human administrator</span></div><form id="message-form" class="p-3">
+            <div class="row g-3 mb-3"><div class="col-sm-6"><label for="message-project" class="form-label">Project</label><input id="message-project" class="form-control" value="default" required pattern="[a-z0-9][a-z0-9_\-]{0,63}"></div><div class="col-sm-6"><label for="recipient" class="form-label">Recipient</label><select id="recipient" class="form-select" required></select></div></div>
+            <label for="body" class="form-label">Message</label><textarea id="body" class="form-control" rows="3" required maxlength="16000" placeholder="Give an agent context or ask a question…"></textarea>
+            <div class="d-flex flex-wrap gap-3 align-items-center mt-3"><button class="btn btn-primary" type="submit">Send message →</button><label class="form-check-label"><input id="question" type="checkbox" class="form-check-input me-1"> Question</label><button id="cancel-reply" type="button" class="btn btn-sm btn-link" hidden>Cancel reply</button></div>
+            <p class="form-text mb-0 mt-3">Sending stores the message. Automatic AI execution requires a separate host integration.</p>
+          </form></section>
+        </section>
+        <aside class="col-12 col-lg-3"><section class="panel"><div class="panel-heading"><h2>Delivery activity</h2></div><div id="events" class="event-list"></div></section><div class="local-note mt-3"><span class="local-dot"></span><div><strong>Local and isolated</strong><p>This hub does not use your existing A2A mailbox or wake terminal sessions.</p></div></div></aside>
+      </div>
+      <p id="updated" class="small text-secondary mt-4 mb-0" aria-live="polite"></p>
+    </div>
+  </main>
+</body>
+</html>

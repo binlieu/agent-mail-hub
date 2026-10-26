@@ -1,0 +1,48 @@
+{
+  "name": "agent-mail-hub",
+  "version": "0.1.0",
+  "description": "An isolated local MCP messaging hub with SQLite and a bundled web dashboard",
+  "type": "module",
+  "license": "UNLICENSED",
+  "bin": {
+    "agent-mail-hub": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24.6.0"
+  },
+  "files": [
+    "dist",
+    "public",
+    "docs",
+    "examples",
+    "README.md",
+    "AGENTS.md",
+    "src",
+    "scripts",
+    "test",
+    "tsconfig.json"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "start": "node dist/cli.js start",
+    "setup": "node dist/cli.js setup",
+    "doctor": "node dist/cli.js doctor",
+    "demo": "node dist/cli.js demo",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build",
+    "check": "tsc --noEmit",
+    "test:ui": "npm run build && node scripts/check-dashboard.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "bootstrap": "5.3.8",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "playwright": "1.64.1",
+    "typescript": "7.0.2"
+  },
+  "private": true
+}
